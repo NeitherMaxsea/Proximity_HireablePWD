@@ -1,3 +1,4 @@
 functions/.env
 data-frontend/node_modules/
 data-frontend/dist/
+.vercel/
