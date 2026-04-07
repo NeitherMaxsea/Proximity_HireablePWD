@@ -7,6 +7,7 @@ import ApplicantSettingsModal from '@/authenticator/setting_app.vue'
 import ApplicantMyProfile from '@/modules/Applicant/applicant-myprofile.vue'
 import ApplicantNavbar from '@/modules/Applicant/applicant_navbar.vue'
 import ApplicantApplications from '@/modules/Applicant/applicant_applications.vue'
+import ApplicantContracts from '@/modules/Applicant/applicant_contracts.vue'
 import ApplicantFindJobs from '@/modules/Applicant/applicant_findjobs.vue'
 import ApplicantInbox from '@/modules/Applicant/applicant_inbox.vue'
 import ApplicantInterviews from '@/modules/Applicant/applicant_interviews.vue'
@@ -117,6 +118,10 @@ const isApplicantAvatarUploading = ref(false)
 const isApplicantProfileSaving = ref(false)
 const applicantProfileMessage = ref('')
 const applicantProfileMessageTone = ref('success')
+const activeApplicantContractId = ref('')
+const applicantContractSignatureName = ref('')
+const applicantContractConsentChecked = ref(false)
+const activeApplicantContractSubmittingId = ref('')
 const isApplicantSettingsModalOpen = ref(false)
 const applicantSettingsReturnSection = ref('find-jobs')
 let banPollId
@@ -146,6 +151,7 @@ const APPLICANT_MODULE_LABELS = {
   applications: 'My Applications',
   interviews: 'Interviews',
   'job-offers': 'Job Offers',
+  contracts: 'Contracts',
   'technical-assessment': 'Technical Assessment',
 }
 const DEFAULT_APPLICANT_MODULE_ACCESS = Object.keys(APPLICANT_MODULE_LABELS).map((id) => ({
@@ -240,7 +246,7 @@ const canViewApplicantModule = (moduleId) => {
 }
 
 const resolveFirstAvailableApplicantSection = () => {
-  const preferredSections = ['find-jobs', 'applications', 'technical-assessment', 'interviews', 'job-offers', 'profile', 'settings']
+  const preferredSections = ['find-jobs', 'applications', 'technical-assessment', 'interviews', 'job-offers', 'contracts', 'profile', 'settings']
   return preferredSections.find((sectionId) => canViewApplicantModule(sectionId)) || 'find-jobs'
 }
 
@@ -337,7 +343,7 @@ const openTermsAndPolicies = () => {
 }
 
 const resolveApplicantSettingsReturnSection = () => {
-  const preferredSections = ['find-jobs', 'applications', 'technical-assessment', 'interviews', 'job-offers', 'messages', 'profile']
+  const preferredSections = ['find-jobs', 'applications', 'technical-assessment', 'interviews', 'job-offers', 'contracts', 'messages', 'profile']
   return preferredSections.find((sectionId) => canViewApplicantModule(sectionId)) || 'find-jobs'
 }
 
@@ -418,7 +424,7 @@ const handleApplicantNotificationOpen = (notification) => {
     return
   }
 
-  if (['applications', 'interviews', 'job-offers', 'technical-assessment', 'find-jobs', 'messages', 'profile', 'settings'].includes(targetSection)
+  if (['applications', 'interviews', 'job-offers', 'contracts', 'technical-assessment', 'find-jobs', 'messages', 'profile', 'settings'].includes(targetSection)
     && canViewApplicantModule(targetSection)) {
     isApplicantSettingsModalOpen.value = false
     activeSection.value = targetSection
@@ -434,6 +440,7 @@ const applicantSidebarItemsCatalog = [
   { id: 'technical-assessment', label: 'Technical Assessment', icon: 'bi bi-ui-checks-grid', description: 'Open assigned assessments and check your results.' },
   { id: 'interviews', label: 'Interviews', icon: 'bi bi-calendar-check', description: 'Review schedules, confirmations, and interview updates.' },
   { id: 'job-offers', label: 'Job Offers', icon: 'bi bi-briefcase', description: 'Review accepted offers and final hiring updates.' },
+  { id: 'contracts', label: 'Contracts', icon: 'bi bi-file-earmark-check', description: 'Preview the contract review and signing layout from the pilot merge branch.' },
   { id: 'messages', label: 'Inbox', icon: 'bi bi-inbox', description: 'Check employer messages and conversation updates in one inbox.' },
 ]
 
@@ -2692,6 +2699,33 @@ const applicantJobOfferRecords = computed(() =>
     .sort((left, right) => (right.updatedAtValue || 0) - (left.updatedAtValue || 0)),
 )
 
+const applicantContractRecords = computed(() => [])
+
+const selectApplicantContract = (contractId) => {
+  activeApplicantContractId.value = String(contractId || '').trim()
+  applicantContractConsentChecked.value = false
+}
+
+const signApplicantContract = async ({ contractId } = {}) => {
+  const normalizedContractId = String(contractId || '').trim()
+  if (!normalizedContractId || activeApplicantContractSubmittingId.value) return
+
+  activeApplicantContractSubmittingId.value = normalizedContractId
+  try {
+    notify('Pilot merge preview only: the applicant contract signing layout is ready for UI review on this branch.', 'success', 'Contract preview')
+  } finally {
+    activeApplicantContractSubmittingId.value = ''
+  }
+}
+
+const openApplicantContractProviderPreview = () => {
+  notify('Pilot merge preview only: provider-based contract signing will be wired after you approve this merge layout.', 'warning', 'Preview branch')
+}
+
+const refreshApplicantContractProviderPreview = () => {
+  notify('Pilot merge preview refreshed. This branch currently focuses on merged UI layout before the full live contract wiring.', 'warning', 'Preview branch')
+}
+
 watch(visibleApplicantApplications, (records) => {
   applicantApplicationStats.value = summarizeApplicantApplications(records)
 }, { immediate: true })
@@ -3886,6 +3920,22 @@ onBeforeUnmount(() => {
           <ApplicantJobOffers
             v-else-if="applicantRenderedSection === 'job-offers'"
             :offer-records="applicantJobOfferRecords"
+          />
+
+          <ApplicantContracts
+            v-else-if="applicantRenderedSection === 'contracts'"
+            :contracts="applicantContractRecords"
+            :active-contract-id="activeApplicantContractId"
+            :applicant-signature-name="applicantContractSignatureName"
+            :applicant-consent-checked="applicantContractConsentChecked"
+            :active-submitting-contract-id="activeApplicantContractSubmittingId"
+            :active-provider-contract-id="''"
+            @select-contract="selectApplicantContract"
+            @update:applicant-signature-name="applicantContractSignatureName = $event"
+            @update:applicant-consent-checked="applicantContractConsentChecked = $event"
+            @sign-contract="signApplicantContract"
+            @open-provider-sign="openApplicantContractProviderPreview"
+            @refresh-provider-status="refreshApplicantContractProviderPreview"
           />
 
           <div v-else class="applicant-placeholder__card">

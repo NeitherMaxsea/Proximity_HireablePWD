@@ -6,6 +6,7 @@ import { computed, defineAsyncComponent, defineComponent, h, nextTick, onBeforeU
 import { httpsCallable } from 'firebase/functions'
 import { useRoute, useRouter } from 'vue-router'
 import BModals from '@/modules/Employer/Business/modals.vue'
+import BIssueOfferModal from '@/modules/Employer/Business/business_issue_offer.vue'
 import BNavbar from '@/modules/Employer/Business/business_Navbar.vue'
 import BSidebar from '@/modules/Employer/Business/business_Sidebar.vue'
 import BUserNavbar from '@/modules/Employer/Business/business_user_navbar.vue'
@@ -191,6 +192,8 @@ const BTraining = createBusinessAsyncSection(() => import('@/modules/Employer/Bu
 const BSubscription = createBusinessAsyncSection(() => import('@/modules/Employer/Business/business_Subscription.vue'), 'subscription section')
 const BPayment = createBusinessAsyncSection(() => import('@/modules/Employer/Business/business_Payment.vue'), 'payment section')
 const BPaymentHistory = createBusinessAsyncSection(() => import('@/modules/Employer/Business/business_PaymentHistory.vue'), 'payment history section')
+const BIssueOffer = createBusinessAsyncSection(() => import('@/modules/Employer/Business/business_IssueOffer.vue'), 'issue offer section')
+const BContractSigning = createBusinessAsyncSection(() => import('@/modules/Employer/Business/business_ContractSigning.vue'), 'contract signing section')
 
 let isApplyingBusinessSecurityRouteState = false
 let isSyncingBusinessSecurityRouteState = false
@@ -392,6 +395,8 @@ let businessAccessRealtimeTimerId = null
 const premiumNavigationItems = [
   { id: 'job-posting', label: 'Job Posting', icon: 'bi bi-megaphone-fill' },
   { id: 'applicant-management', label: 'Applicant Management', icon: 'bi bi-people-fill' },
+  { id: 'issue-offer', label: 'Issue Offer', icon: 'bi bi-envelope-paper-fill' },
+  { id: 'contract-signing', label: 'Contract Signing', icon: 'bi bi-pen-fill' },
   { id: 'assessment-management', label: 'Assessment Management', icon: 'bi bi-ui-checks-grid' },
   { id: 'applicant-score', label: 'Applicant Score', icon: 'bi bi-bar-chart-fill' },
   { id: 'interview-scheduling', label: 'Interview Scheduling', icon: 'bi bi-calendar-event-fill' },
@@ -636,6 +641,14 @@ const sidebarGroups = computed(() => {
         {
           id: 'applicant-management',
           label: 'Applicant Management',
+        },
+        {
+          id: 'issue-offer',
+          label: 'Issue Offer',
+        },
+        {
+          id: 'contract-signing',
+          label: 'Contract Signing',
         },
       ],
     },
@@ -882,6 +895,8 @@ const getSidebarItemIcon = (itemId = '') =>
   || ({
     'job-posting': 'bi bi-megaphone-fill',
     'applicant-management': 'bi bi-people-fill',
+    'issue-offer': 'bi bi-envelope-paper-fill',
+    'contract-signing': 'bi bi-pen-fill',
     'user-overview': 'bi bi-people',
     'create-user': 'bi bi-person-plus-fill',
     'add-employee': 'bi bi-person-vcard-fill',
@@ -941,6 +956,24 @@ const staticBusinessSectionContent = {
       { title: 'New Applicants', copy: 'Open the newest candidate submissions and review their fit for your roles.' },
       { title: 'Shortlist Queue', copy: 'Keep promising applicants organized so the next steps are easier to manage.' },
       { title: 'Interview Tracking', copy: 'Monitor who is ready for interview and what follow-up is still pending.' },
+    ],
+  },
+  'issue-offer': {
+    title: 'Issue Offer',
+    description: 'Preview the merged offer queue so approved applicants and interview passers can receive job offers inside the business workspace.',
+    cards: [
+      { title: 'Offer Queue', copy: 'See which applicants are ready for job offer drafting without leaving the main recruitment flow.' },
+      { title: 'Offer Modal', copy: 'Open a guided preview modal for compensation, start date, and offer letter details.' },
+      { title: 'Pilot Review', copy: 'Use this preview branch to check the layout and sequence before the final live merge.' },
+    ],
+  },
+  'contract-signing': {
+    title: 'Contract Signing',
+    description: 'Preview the post-offer contract handling page before we fully wire the live signing flow into the current workspace.',
+    cards: [
+      { title: 'Accepted Queue', copy: 'See the applicants who would move next into contract preparation once offers are confirmed.' },
+      { title: 'Draft Contract', copy: 'Review how the contract editor and signature panel would look in the merged version.' },
+      { title: 'Countersign Flow', copy: 'Pilot the page structure first so the full merge can stay cleaner and safer.' },
     ],
   },
   'assessment-management': {
@@ -2025,6 +2058,8 @@ const permissionModuleSections = [
     modules: [
       { id: 'job-posting', label: 'Job Posting', description: 'Create and manage job opportunities.' },
       { id: 'applicant-management', label: 'Applicant Management', description: 'Review applicants and move them through recruitment.' },
+      { id: 'issue-offer', label: 'Issue Offer', description: 'Preview and prepare job offers for approved or interview-pass applicants.' },
+      { id: 'contract-signing', label: 'Contract Signing', description: 'Preview contract sending and countersigning after offer acceptance.' },
     ],
   },
   {
@@ -2153,6 +2188,8 @@ const createDefaultPermissionRoles = () => [
       'dashboard',
       'job-posting',
       'applicant-management',
+      'issue-offer',
+      'contract-signing',
       'assessment-management',
       'applicant-score',
       'interview-scheduling',
@@ -6177,6 +6214,487 @@ const isApprovedBusinessApplication = (application = {}) => {
   return ['accepted', 'approved', 'hired'].includes(normalizedStatus)
 }
 
+const isBusinessIssueOfferOpen = ref(false)
+const businessIssueOfferSelectedApplicationId = ref('')
+const isBusinessJobOfferSaving = ref(false)
+const businessIssueOfferFormError = ref('')
+const createDefaultBusinessIssueOfferDraft = () => ({
+  offerTitle: '',
+  compensation: '',
+  startDate: '',
+  responseDeadline: '',
+  offerLetter: '',
+})
+const businessIssueOfferDraft = ref(createDefaultBusinessIssueOfferDraft())
+const contractSigningFilter = ref('all')
+const contractSigningSelectedRowId = ref('')
+const isBusinessContractSaving = ref(false)
+const activeBusinessContractSigningId = ref('')
+const businessContractSignatureName = ref('')
+const createDefaultBusinessContractDraft = () => ({
+  applicationId: '',
+  applicantId: '',
+  applicantName: '',
+  applicantEmail: '',
+  jobId: '',
+  jobTitle: '',
+  companyName: '',
+  businessName: '',
+  contractTitle: '',
+  employmentType: '',
+  salaryOffer: '',
+  startDate: '',
+  notes: '',
+  contractBody: '',
+})
+const businessContractDraft = ref(createDefaultBusinessContractDraft())
+
+const normalizePilotBusinessOfferStatus = (application = {}) =>
+  String(application?.jobOfferStatus || application?.job_offer_status || '').trim().toLowerCase() || 'not_sent'
+
+const getPilotBusinessOfferTone = (value = '') => {
+  const normalizedValue = String(value || '').trim().toLowerCase()
+  if (normalizedValue === 'accepted') return 'success'
+  if (normalizedValue === 'rejected') return 'danger'
+  if (normalizedValue === 'sent') return 'warning'
+  return 'muted'
+}
+
+const formatPilotBusinessOfferStatusLabel = (value = '') => {
+  const normalizedValue = String(value || '').trim().toLowerCase()
+  if (normalizedValue === 'accepted') return 'Offer Accepted'
+  if (normalizedValue === 'rejected') return 'Offer Declined'
+  if (normalizedValue === 'sent') return 'Offer Sent'
+  return 'Ready for Offer'
+}
+
+const buildBusinessIssueOfferStageSummary = (application = {}) => {
+  const applicationId = String(application?.id || '').trim()
+  const latestInterview = getLatestBusinessInterviewSchedule(applicationId)
+  const hasCompletedFinalInterview = hasCompletedBusinessInterviewType(applicationId, 'final')
+  const hasCompletedInitialInterview = hasCompletedBusinessInterviewType(applicationId, 'initial')
+
+  return {
+    interviewType: hasCompletedFinalInterview ? 'final' : 'initial',
+    passedStageLabel: hasCompletedFinalInterview
+      ? 'Final Interview Completed'
+      : hasCompletedInitialInterview
+        ? 'Initial Interview Completed'
+        : isApprovedBusinessApplication(application)
+          ? 'Application Approved'
+          : 'Ready for Offer',
+    completedAt: String(
+      latestInterview?.scheduledAt
+      || latestInterview?.updatedAt
+      || application?.approvedAt
+      || application?.reviewedAt
+      || application?.updatedAt
+      || application?.appliedAt
+      || application?.createdAt
+      || '',
+    ).trim(),
+    interviewer: String(
+      latestInterview?.interviewer
+      || application?.reviewedByName
+      || authUser.value?.name
+      || businessName.value
+      || 'Business Hiring Team',
+    ).trim(),
+  }
+}
+
+const canIssueOfferForApplication = (application = {}) => {
+  if (!application || !isBusinessApplicationLinkedToPostedJob(application)) return false
+
+  const normalizedStatus = normalizeUserOverviewValue(application?.status || 'pending')
+  if (['rejected', 'discontinued'].includes(normalizedStatus)) return false
+
+  const applicationId = String(application?.id || '').trim()
+  return hasCompletedBusinessInterviewType(applicationId, 'final')
+    || hasCompletedBusinessInterviewType(applicationId, 'initial')
+    || isApprovedBusinessApplication(application)
+}
+
+const buildBusinessIssueOfferLetter = (application = {}, stageSummary = {}) => {
+  const applicantName = String(application?.applicantName || 'Applicant').trim() || 'Applicant'
+  const jobTitle = String(application?.jobTitle || 'the position').trim() || 'the position'
+  const companyLabel = String(businessName.value || application?.businessName || application?.companyName || 'our business').trim()
+  const compensation = String(application?.salaryRange || 'the compensation package discussed').trim()
+
+  return [
+    `Hello ${applicantName},`,
+    '',
+    `We are pleased to offer you the ${jobTitle} role at ${companyLabel}.`,
+    '',
+    `Compensation: ${compensation || 'To be finalized with you.'}`,
+    '',
+    `This preview offer follows your ${String(stageSummary?.passedStageLabel || 'application progress').trim().toLowerCase()}.`,
+    '',
+    'This pilot branch lets us review the merged UI first before the final live offer flow is fully enabled.',
+    '',
+    `Regards,`,
+    companyLabel,
+  ].join('\n')
+}
+
+const buildBusinessIssueOfferCandidate = (application = {}) => {
+  if (!application) return null
+
+  const stageSummary = buildBusinessIssueOfferStageSummary(application)
+  const offerStatus = normalizePilotBusinessOfferStatus(application)
+
+  return {
+    id: String(application?.id || '').trim(),
+    applicationId: String(application?.id || '').trim(),
+    applicantId: String(application?.applicantId || application?.applicant_id || '').trim(),
+    applicantName: String(application?.applicantName || 'Applicant').trim() || 'Applicant',
+    applicantEmail: String(application?.applicantEmail || '').trim().toLowerCase(),
+    applicantAvatar: mediaUrl(String(application?.applicantAvatar || application?.avatar || application?.avatar_url || '').trim()),
+    jobId: String(application?.jobId || application?.job_id || '').trim(),
+    jobTitle: String(application?.jobTitle || 'Applied Job').trim() || 'Applied Job',
+    passedStageLabel: stageSummary.passedStageLabel,
+    completedAt: stageSummary.completedAt,
+    interviewer: stageSummary.interviewer,
+    interviewType: stageSummary.interviewType,
+    offerStatus,
+    offerStatusLabel: formatPilotBusinessOfferStatusLabel(offerStatus),
+    offerTone: getPilotBusinessOfferTone(offerStatus),
+  }
+}
+
+const issueOfferQueueRows = computed(() =>
+  businessJobApplications.value
+    .filter((application) => isBusinessApplicationLinkedToPostedJob(application) && canIssueOfferForApplication(application))
+    .map((application) => {
+      const candidate = buildBusinessIssueOfferCandidate(application)
+      const lastActivityValue = Date.parse(String(candidate?.completedAt || application?.updatedAt || application?.appliedAt || application?.createdAt || '').trim()) || 0
+
+      return {
+        id: candidate.id,
+        applicationId: candidate.applicationId,
+        applicantName: candidate.applicantName,
+        applicantEmail: candidate.applicantEmail || 'No email',
+        applicantAvatar: candidate.applicantAvatar,
+        applicantInitials: buildUserOverviewInitials(candidate.applicantName, 'AP'),
+        jobTitle: candidate.jobTitle,
+        offerTitle: String(application?.jobOfferTitle || application?.job_offer_title || '').trim(),
+        passedStageLabel: candidate.passedStageLabel,
+        completedAt: candidate.completedAt,
+        offerStatus: candidate.offerStatus,
+        offerStatusLabel: candidate.offerStatusLabel,
+        offerTone: candidate.offerTone,
+        offerMeta: candidate.offerStatus === 'not_sent'
+          ? 'Open the preview modal to review the merged offer layout.'
+          : 'This row already has mirrored offer details on the application record.',
+        actionLabel: candidate.offerStatus === 'not_sent' ? 'Open Preview' : 'Review Offer',
+        lastActivityValue,
+      }
+    })
+    .sort((left, right) => right.lastActivityValue - left.lastActivityValue),
+)
+
+const selectedBusinessIssueOfferCandidate = computed(() =>
+  buildBusinessIssueOfferCandidate(getApplicantManagementApplicationById(businessIssueOfferSelectedApplicationId.value)),
+)
+
+const businessIssueOfferMinDate = computed(() => new Date().toISOString().slice(0, 10))
+
+const applyBusinessIssueOfferDraft = (application = {}) => {
+  const stageSummary = buildBusinessIssueOfferStageSummary(application)
+  const today = new Date()
+  const startDate = new Date(today)
+  startDate.setDate(startDate.getDate() + 7)
+  const deadline = new Date(today)
+  deadline.setDate(deadline.getDate() + 5)
+
+  businessIssueOfferDraft.value = {
+    offerTitle: String(application?.jobOfferTitle || application?.job_offer_title || `${String(application?.jobTitle || 'Job').trim()} Job Offer`).trim(),
+    compensation: String(application?.jobOfferCompensation || application?.job_offer_compensation || application?.salaryRange || '').trim(),
+    startDate: String(application?.jobOfferStartDate || application?.job_offer_start_date || startDate.toISOString().slice(0, 10)).trim(),
+    responseDeadline: String(application?.jobOfferResponseDeadline || application?.job_offer_response_deadline || deadline.toISOString().slice(0, 10)).trim(),
+    offerLetter: String(application?.jobOfferLetter || application?.job_offer_letter || buildBusinessIssueOfferLetter(application, stageSummary)).trim(),
+  }
+}
+
+const openIssueOfferModal = (applicationId) => {
+  const targetApplication = getApplicantManagementApplicationById(applicationId)
+  if (!targetApplication) {
+    showPaymentToast('That applicant application could not be found.', 'error')
+    return
+  }
+
+  businessIssueOfferSelectedApplicationId.value = String(targetApplication.id || '').trim()
+  applyBusinessIssueOfferDraft(targetApplication)
+  businessIssueOfferFormError.value = ''
+  isBusinessIssueOfferOpen.value = true
+}
+
+const closeIssueOfferModal = () => {
+  if (isBusinessJobOfferSaving.value) return
+
+  isBusinessIssueOfferOpen.value = false
+  businessIssueOfferSelectedApplicationId.value = ''
+  businessIssueOfferDraft.value = createDefaultBusinessIssueOfferDraft()
+  businessIssueOfferFormError.value = ''
+}
+
+const setBusinessIssueOfferField = (field, value) => {
+  businessIssueOfferDraft.value = {
+    ...businessIssueOfferDraft.value,
+    [field]: value,
+  }
+}
+
+const submitBusinessIssueOffer = async () => {
+  const requiredFields = [
+    ['offer title', businessIssueOfferDraft.value.offerTitle],
+    ['compensation', businessIssueOfferDraft.value.compensation],
+    ['start date', businessIssueOfferDraft.value.startDate],
+    ['response deadline', businessIssueOfferDraft.value.responseDeadline],
+    ['offer letter', businessIssueOfferDraft.value.offerLetter],
+  ]
+  const missingFields = requiredFields
+    .filter(([, value]) => String(value || '').trim() === '')
+    .map(([label]) => label)
+
+  if (missingFields.length) {
+    businessIssueOfferFormError.value = `Please complete the ${missingFields.join(', ')} before continuing.`
+    return
+  }
+
+  isBusinessJobOfferSaving.value = true
+  businessIssueOfferFormError.value = ''
+
+  try {
+    showPaymentToast('Pilot preview only: the Issue Offer layout is now in place on this branch for UI review before the live merge.', 'success')
+    closeIssueOfferModal()
+  } finally {
+    isBusinessJobOfferSaving.value = false
+  }
+}
+
+const normalizeBusinessContractStatus = (value = '') =>
+  String(value || '').trim().toLowerCase() || 'draft'
+
+const getBusinessContractStatusLabel = (value = '') => {
+  const normalizedStatus = normalizeBusinessContractStatus(value)
+  if (normalizedStatus === 'completed') return 'Completed'
+  if (normalizedStatus === 'applicant_signed') return 'Returned by Applicant'
+  if (normalizedStatus === 'sent') return 'Sent to Applicant'
+  return 'Ready to Send'
+}
+
+const getBusinessContractStatusTone = (value = '') => {
+  const normalizedStatus = normalizeBusinessContractStatus(value)
+  if (normalizedStatus === 'completed') return 'success'
+  if (normalizedStatus === 'applicant_signed') return 'info'
+  if (normalizedStatus === 'sent') return 'warning'
+  return 'muted'
+}
+
+const buildBusinessContractBody = (row = {}) => {
+  const applicantName = String(row?.name || row?.applicantName || 'Applicant').trim() || 'Applicant'
+  const businessLabel = String(row?.businessName || row?.companyName || businessName.value || 'Business').trim()
+  const jobTitle = String(row?.jobTitle || row?.role || 'Applied Job').trim() || 'Applied Job'
+  const compensation = String(row?.salaryOffer || row?.compensation || 'To be finalized').trim()
+  const startDate = String(row?.startDate || '').trim()
+  const employmentType = String(row?.employmentType || 'Full-time').trim()
+
+  return [
+    `This Employment Contract is entered into by and between ${businessLabel} and ${applicantName}.`,
+    '',
+    `${applicantName} is being offered the position of ${jobTitle} under a ${employmentType.toLowerCase()} arrangement.`,
+    '',
+    `Compensation: ${compensation}`,
+    startDate ? `Target start date: ${startDate}` : 'Target start date: To be finalized with the applicant.',
+    '',
+    'Both parties will review the final live signing flow after this preview branch is approved.',
+  ].join('\n')
+}
+
+const buildBusinessContractDraftFromRow = (row = {}) => ({
+  applicationId: String(row?.applicationId || row?.id || '').trim(),
+  applicantId: String(row?.applicantId || '').trim(),
+  applicantName: String(row?.name || 'Applicant').trim() || 'Applicant',
+  applicantEmail: String(row?.email || '').trim().toLowerCase(),
+  jobId: String(row?.jobId || '').trim(),
+  jobTitle: String(row?.jobTitle || row?.role || 'Applied Job').trim() || 'Applied Job',
+  companyName: String(row?.companyName || row?.businessName || businessName.value || '').trim(),
+  businessName: String(row?.businessName || row?.companyName || businessName.value || '').trim(),
+  contractTitle: String(row?.contractTitle || `${String(row?.jobTitle || 'Employment').trim()} Contract`).trim(),
+  employmentType: String(row?.employmentType || row?.jobType || 'Full-time').trim() || 'Full-time',
+  salaryOffer: String(row?.salaryOffer || row?.compensation || '').trim(),
+  startDate: String(row?.startDate || '').trim(),
+  notes: String(row?.notes || '').trim(),
+  contractBody: String(row?.contractBody || buildBusinessContractBody(row)).trim(),
+})
+
+const contractSigningQueueRows = computed(() =>
+  issueOfferQueueRows.value
+    .filter((row) => row.offerStatus === 'accepted' || isApprovedBusinessApplication(getApplicantManagementApplicationById(row.applicationId)))
+    .map((row) => ({
+      id: row.id,
+      applicationId: row.applicationId,
+      applicantId: String(getApplicantManagementApplicationById(row.applicationId)?.applicantId || '').trim(),
+      name: row.applicantName,
+      email: row.applicantEmail,
+      jobId: String(getApplicantManagementApplicationById(row.applicationId)?.jobId || '').trim(),
+      jobTitle: row.jobTitle,
+      role: row.jobTitle,
+      jobType: String(getApplicantManagementApplicationById(row.applicationId)?.jobType || getApplicantManagementApplicationById(row.applicationId)?.job_type || 'Full-time').trim(),
+      companyName: String(getApplicantManagementApplicationById(row.applicationId)?.companyName || getApplicantManagementApplicationById(row.applicationId)?.businessName || businessName.value || '').trim(),
+      businessName: String(getApplicantManagementApplicationById(row.applicationId)?.businessName || getApplicantManagementApplicationById(row.applicationId)?.companyName || businessName.value || '').trim(),
+      offerTitle: row.offerTitle || `${row.jobTitle} Job Offer`,
+      offerStatus: row.offerStatus,
+      offerStatusLabel: row.offerStatusLabel,
+      compensation: String(getApplicantManagementApplicationById(row.applicationId)?.salaryRange || '').trim(),
+      startDate: String(businessIssueOfferDraft.value.startDate || '').trim(),
+      status: 'draft',
+      statusLabel: getBusinessContractStatusLabel('draft'),
+      statusTone: getBusinessContractStatusTone('draft'),
+      nextStep: 'Pilot preview: review the contract layout and countersign flow before the final merge.',
+      contractTitle: `${row.jobTitle} Employment Contract`,
+      employmentType: String(getApplicantManagementApplicationById(row.applicationId)?.jobType || getApplicantManagementApplicationById(row.applicationId)?.job_type || 'Full-time').trim() || 'Full-time',
+      salaryOffer: String(getApplicantManagementApplicationById(row.applicationId)?.salaryRange || '').trim(),
+      notes: 'Pilot preview only.',
+      contractBody: buildBusinessContractBody({
+        applicantName: row.applicantName,
+        jobTitle: row.jobTitle,
+        businessName: businessName.value,
+        compensation: String(getApplicantManagementApplicationById(row.applicationId)?.salaryRange || '').trim(),
+      }),
+      sentAt: '',
+      applicantSignedAt: '',
+      businessSignedAt: '',
+      canSend: true,
+      canBusinessSign: false,
+      lastActivityValue: row.lastActivityValue,
+    }))
+    .sort((left, right) => right.lastActivityValue - left.lastActivityValue),
+)
+
+const contractSigningOverviewCards = computed(() => ([
+  {
+    label: 'Ready For Contract',
+    value: String(contractSigningQueueRows.value.length),
+    copy: 'Preview candidates that would enter contract handling in the merged version.',
+  },
+  {
+    label: 'Ready To Send',
+    value: String(contractSigningQueueRows.value.filter((row) => row.status === 'draft').length),
+    copy: 'Draft contracts that still need the final live send flow.',
+  },
+  {
+    label: 'Returned',
+    value: '0',
+    copy: 'Returned-by-applicant states will be connected during the full live merge.',
+  },
+  {
+    label: 'Completed',
+    value: '0',
+    copy: 'Completed countersigning will appear here once the live contract flow is enabled.',
+  },
+]))
+
+const contractSigningFilterChips = computed(() => {
+  const rows = contractSigningQueueRows.value
+  return [
+    { id: 'all', label: 'All', count: rows.length },
+    { id: 'draft', label: 'Ready To Send', count: rows.filter((row) => row.status === 'draft').length },
+    { id: 'sent', label: 'Awaiting Applicant', count: rows.filter((row) => row.status === 'sent').length },
+    { id: 'applicant_signed', label: 'Returned', count: rows.filter((row) => row.status === 'applicant_signed').length },
+    { id: 'completed', label: 'Completed', count: rows.filter((row) => row.status === 'completed').length },
+  ]
+})
+
+const contractSigningLastSyncedLabel = computed(() =>
+  contractSigningQueueRows.value.length
+    ? 'Pilot merge preview: contract queue is using current workspace application data.'
+    : 'Pilot merge preview: no contract-ready applicants are visible yet.',
+)
+
+const contractSigningTraceSummary = computed(() =>
+  `${contractSigningQueueRows.value.length} preview contract row(s) generated from the current business workspace data.`,
+)
+
+const filteredContractSigningQueueRows = computed(() => {
+  const activeFilter = String(contractSigningFilter.value || 'all').trim()
+  if (activeFilter === 'all') return contractSigningQueueRows.value
+  return contractSigningQueueRows.value.filter((row) => row.status === activeFilter)
+})
+
+const selectedContractSigningRow = computed(() =>
+  filteredContractSigningQueueRows.value.find((row) => row.id === contractSigningSelectedRowId.value)
+  || filteredContractSigningQueueRows.value[0]
+  || contractSigningQueueRows.value[0]
+  || null,
+)
+
+const restoreSelectedContractSigningDraft = () => {
+  businessContractDraft.value = selectedContractSigningRow.value
+    ? buildBusinessContractDraftFromRow(selectedContractSigningRow.value)
+    : createDefaultBusinessContractDraft()
+}
+
+const selectContractSigningRow = (rowId) => {
+  const normalizedRowId = String(rowId || '').trim()
+  if (!normalizedRowId) return
+
+  contractSigningSelectedRowId.value = normalizedRowId
+  restoreSelectedContractSigningDraft()
+}
+
+const setContractDraftField = (field, value) => {
+  businessContractDraft.value = {
+    ...businessContractDraft.value,
+    [field]: value,
+  }
+}
+
+const refreshContractSigningQueue = () => {
+  restoreSelectedContractSigningDraft()
+  showPaymentToast('Pilot merge preview refreshed using the current business workspace data.', 'warning')
+}
+
+const sendContractToApplicant = () => {
+  showPaymentToast('Pilot preview only: the contract send action will be fully wired after you approve this merged layout.', 'warning')
+}
+
+const saveAndSendBusinessContract = async () => {
+  if (isBusinessContractSaving.value) return
+  isBusinessContractSaving.value = true
+  try {
+    showPaymentToast('Pilot preview only: contract drafting layout is ready for UI review on this branch.', 'success')
+  } finally {
+    isBusinessContractSaving.value = false
+  }
+}
+
+const completeBusinessContractSigning = async () => {
+  if (activeBusinessContractSigningId.value) return
+  activeBusinessContractSigningId.value = String(selectedContractSigningRow.value?.id || '').trim()
+  try {
+    showPaymentToast('Pilot preview only: business countersign action will be enabled in the final live merge.', 'warning')
+  } finally {
+    activeBusinessContractSigningId.value = ''
+  }
+}
+
+watch(filteredContractSigningQueueRows, (rows) => {
+  const availableIds = rows.map((row) => String(row?.id || '').trim()).filter(Boolean)
+  if (!availableIds.length) {
+    contractSigningSelectedRowId.value = ''
+    businessContractDraft.value = createDefaultBusinessContractDraft()
+    return
+  }
+
+  if (!availableIds.includes(String(contractSigningSelectedRowId.value || '').trim())) {
+    contractSigningSelectedRowId.value = availableIds[0]
+  }
+
+  restoreSelectedContractSigningDraft()
+}, { immediate: true })
+
 const syncApprovedApplicantProfilesFromApplications = () => {
   approvedApplicantProfiles.value = businessJobApplications.value
     .filter((application) =>
@@ -9475,6 +9993,38 @@ const applicantBindings = createApplicantBindings({
   requestApproveApplicantManagementApplication,
 })
 
+const issueOfferBindings = computed(() => ({
+  rows: issueOfferQueueRows.value,
+  canEditBusinessModule,
+  openIssueOfferModal,
+}))
+
+const contractSigningBindings = computed(() => ({
+  overviewCards: contractSigningOverviewCards.value,
+  filterChips: contractSigningFilterChips.value,
+  activeFilter: contractSigningFilter.value,
+  setFilter: (value) => { contractSigningFilter.value = String(value || 'all').trim() || 'all' },
+  syncLabel: contractSigningLastSyncedLabel.value,
+  traceSummary: contractSigningTraceSummary.value,
+  refreshQueue: refreshContractSigningQueue,
+  rows: filteredContractSigningQueueRows.value,
+  selectedRowId: contractSigningSelectedRowId.value,
+  selectRow: selectContractSigningRow,
+  sendContractToApplicant,
+  selectedRow: selectedContractSigningRow.value,
+  selectedRecord: null,
+  contractDraft: businessContractDraft.value,
+  setContractDraftField,
+  restoreContractDraft: restoreSelectedContractSigningDraft,
+  saveAndSendBusinessContract,
+  isBusinessContractSaving: isBusinessContractSaving.value,
+  canEditBusinessModule,
+  businessContractSignatureName: businessContractSignatureName.value,
+  setBusinessContractSignatureName: (value) => { businessContractSignatureName.value = value },
+  activeBusinessContractSigningId: activeBusinessContractSigningId.value,
+  completeBusinessContractSigning,
+}))
+
 const permissionBindings = createPermissionBindings({
   permissionRoles,
   selectedPermissionRole,
@@ -10356,6 +10906,10 @@ onBeforeUnmount(() => {
 
             <BApplicant v-else-if="activeSection === 'applicant-management'" v-bind="applicantBindings" />
 
+            <BIssueOffer v-else-if="activeSection === 'issue-offer'" v-bind="issueOfferBindings" />
+
+            <BContractSigning v-else-if="activeSection === 'contract-signing'" v-bind="contractSigningBindings" />
+
             <BTeamMember
               v-else-if="activeSection === 'user-overview' || activeSection === 'create-user' || activeSection === 'add-employee' || activeSection === 'permissions'"
               v-bind="teamMemberBindings"
@@ -10701,6 +11255,21 @@ onBeforeUnmount(() => {
     </section>
 
     <BModals v-bind="modalBindings" />
+    <BIssueOfferModal
+      :is-open="isBusinessIssueOfferOpen"
+      :candidate="selectedBusinessIssueOfferCandidate"
+      :is-submitting="isBusinessJobOfferSaving"
+      :form="businessIssueOfferDraft"
+      :form-error="businessIssueOfferFormError"
+      :min-date="businessIssueOfferMinDate"
+      @close="closeIssueOfferModal"
+      @submit="submitBusinessIssueOffer"
+      @update:form-title="setBusinessIssueOfferField('offerTitle', $event)"
+      @update:form-compensation="setBusinessIssueOfferField('compensation', $event)"
+      @update:form-start-date="setBusinessIssueOfferField('startDate', $event)"
+      @update:form-response-deadline="setBusinessIssueOfferField('responseDeadline', $event)"
+      @update:form-offer-letter="setBusinessIssueOfferField('offerLetter', $event)"
+    />
   </div>
 </template>
 
