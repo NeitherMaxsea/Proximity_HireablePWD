@@ -8254,11 +8254,13 @@ const startBusinessPaymentHistorySync = async () => {
     (entries) => {
       paymentHistoryEntries.value = Array.isArray(entries) ? entries : []
       syncPaymentHistoryToStorage()
+      maybeRestoreBusinessSubscriptionAccess()
       void ensureCurrentSubscriptionHistoryEntrySynced()
     },
     () => {
       if (!paymentHistoryEntries.value.length) {
         paymentHistoryEntries.value = localEntries
+        maybeRestoreBusinessSubscriptionAccess()
       }
     },
   )
@@ -8732,6 +8734,20 @@ const restoreBusinessSubscriptionState = () => {
   } else {
     isSubscriptionStateHydrated.value = true
   }
+}
+
+const maybeRestoreBusinessSubscriptionAccess = () => {
+  if (!authUser.value) return
+
+  const profileAccessState = resolveBusinessSubscriptionAccess(authUser.value, { allowMissingPaidDate: true })
+  const historyBackedState = resolveHistoryBackedBusinessSubscriptionState()
+  const needsRestore = (!isSubscriptionStateHydrated.value || !hasActiveBusinessSubscriptionState())
+    && (profileAccessState.hasPremiumAccess || Boolean(historyBackedState))
+
+  if (!needsRestore) return
+
+  restoreBusinessSubscriptionState()
+  applyBusinessSecurityRouteState()
 }
 
 const buildCurrentBusinessSecurityUser = () => {
