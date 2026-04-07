@@ -23,12 +23,54 @@ const resolveManualChunk = (id) => {
 
   if (!normalizedId.includes('/node_modules/')) return undefined
 
+  if (normalizedId.includes('/tesseract.js/')) {
+    return 'vendor-ocr'
+  }
+
+  if (normalizedId.includes('/@tensorflow/tfjs-core/')) {
+    return 'vendor-tfjs-core'
+  }
+
+  if (normalizedId.includes('/@tensorflow/tfjs-converter/')) {
+    return 'vendor-tfjs-converter'
+  }
+
+  if (normalizedId.includes('/@tensorflow/tfjs-layers/')) {
+    return 'vendor-tfjs-layers'
+  }
+
+  if (normalizedId.includes('/@tensorflow/tfjs-data/')) {
+    return 'vendor-tfjs-data'
+  }
+
+  if (normalizedId.includes('/@tensorflow/tfjs-backend-cpu/')) {
+    return 'vendor-tfjs-cpu'
+  }
+
+  if (normalizedId.includes('/@tensorflow/tfjs-backend-webgl/')) {
+    return 'vendor-tfjs-webgl'
+  }
+
+  if (normalizedId.includes('/@tensorflow/tfjs-backend-wasm/')) {
+    return 'vendor-tfjs-wasm'
+  }
+
+  if (normalizedId.includes('/@tensorflow/tfjs-backend-webgpu/')) {
+    return 'vendor-tfjs-webgpu'
+  }
+
+  if (normalizedId.includes('/@mediapipe/')) {
+    return 'vendor-mediapipe'
+  }
+
+  if (normalizedId.includes('/@tensorflow-models/')) {
+    return 'vendor-face-models'
+  }
+
   if (
     normalizedId.includes('/@tensorflow/')
-    || normalizedId.includes('/@tensorflow-models/')
-    || normalizedId.includes('/tesseract.js/')
   ) {
-    return 'vendor-ml'
+    return 'vendor-tfjs'
   }
 
   if (normalizedId.includes('/firebase/')) {

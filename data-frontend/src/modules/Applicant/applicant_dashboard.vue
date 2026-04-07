@@ -3,11 +3,14 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import AppToast from '@/components/AppToast.vue'
+import ApplicantSettingsModal from '@/authenticator/setting_app.vue'
 import ApplicantMyProfile from '@/modules/Applicant/applicant-myprofile.vue'
 import ApplicantNavbar from '@/modules/Applicant/applicant_navbar.vue'
 import ApplicantApplications from '@/modules/Applicant/applicant_applications.vue'
 import ApplicantFindJobs from '@/modules/Applicant/applicant_findjobs.vue'
+import ApplicantInbox from '@/modules/Applicant/applicant_inbox.vue'
 import ApplicantInterviews from '@/modules/Applicant/applicant_interviews.vue'
+import ApplicantJobOffers from '@/modules/Applicant/applicant_job_offers.vue'
 import ApplicantSidebar from '@/modules/Applicant/applicant_sidebar.vue'
 import ApplicantTechnicalAssessment from '@/modules/Applicant/applicant_technical_assessment.vue'
 import {
@@ -36,9 +39,10 @@ import { getPublicJobs, subscribeToJobDocumentStates, subscribeToPublicJobs } fr
 import { mediaUrl } from '@/lib/media'
 
 const router = useRouter()
-const activeSection = ref('overview')
+const activeSection = ref('find-jobs')
 const authUser = ref(null)
 const applicantRealtimeNow = ref(Date.now())
+const APPLICANT_REALTIME_UI_REFRESH_MS = 60 * 1000
 const banNotice = ref(null)
 const isLogoutConfirmOpen = ref(false)
 const isLogoutSubmitting = ref(false)
@@ -52,7 +56,6 @@ const jobsLoading = ref(true)
 const publicJobs = ref([])
 const selectedFindJobId = ref('')
 const findJobsQuery = ref('')
-const activeJobSuggestion = ref('')
 const applicantJobFilterMode = ref('matched')
 const applicantJobPwdType = ref('')
 const applicantJobSalaryRange = ref('')
@@ -114,6 +117,8 @@ const isApplicantAvatarUploading = ref(false)
 const isApplicantProfileSaving = ref(false)
 const applicantProfileMessage = ref('')
 const applicantProfileMessageTone = ref('success')
+const isApplicantSettingsModalOpen = ref(false)
+const applicantSettingsReturnSection = ref('find-jobs')
 let banPollId
 let dashboardEntryTimerId
 let welcomeToastTimerId
@@ -126,16 +131,21 @@ let stopApplicantTrainingAssignmentsSubscription = null
 let stopApplicantJobDocumentStatesSubscription = null
 let stopAuthUserProfileSync = null
 let applicantAccessRealtimeTimerId = null
+const APPLICANT_JOBS_LOADING_MIN_MS = 2000
+let applicantJobsLoadingCycleId = 0
+let applicantJobsLoadingStartedAt = 0
+let applicantJobsLoadingTimerId = null
 
 const APPLICANT_MODULE_LABELS = {
   overview: 'Dashboard',
-  messages: 'Messages',
+  messages: 'Inbox',
   profile: 'My Profile',
   settings: 'Settings',
   'help-center': 'Help Center',
   'find-jobs': 'Find Jobs',
   applications: 'My Applications',
   interviews: 'Interviews',
+  'job-offers': 'Job Offers',
   'technical-assessment': 'Technical Assessment',
 }
 const DEFAULT_APPLICANT_MODULE_ACCESS = Object.keys(APPLICANT_MODULE_LABELS).map((id) => ({
@@ -230,8 +240,8 @@ const canViewApplicantModule = (moduleId) => {
 }
 
 const resolveFirstAvailableApplicantSection = () => {
-  const preferredSections = ['overview', 'find-jobs', 'applications', 'technical-assessment', 'interviews', 'profile', 'settings']
-  return preferredSections.find((sectionId) => canViewApplicantModule(sectionId)) || 'overview'
+  const preferredSections = ['find-jobs', 'applications', 'technical-assessment', 'interviews', 'job-offers', 'profile', 'settings']
+  return preferredSections.find((sectionId) => canViewApplicantModule(sectionId)) || 'find-jobs'
 }
 
 const getApplicantApplicationRecordId = (record) => String(record?.id || '').trim()
@@ -279,7 +289,41 @@ const notify = (text, kind = 'error', title = getToastTitle(text, kind)) => {
   toast.value = { text, kind, title }
 }
 
+const clearApplicantJobsLoadingTimer = () => {
+  if (!applicantJobsLoadingTimerId) return
+  window.clearTimeout(applicantJobsLoadingTimerId)
+  applicantJobsLoadingTimerId = null
+}
+
+const beginApplicantJobsLoading = () => {
+  applicantJobsLoadingCycleId += 1
+  applicantJobsLoadingStartedAt = Date.now()
+  clearApplicantJobsLoadingTimer()
+  jobsLoading.value = true
+  return applicantJobsLoadingCycleId
+}
+
+const finishApplicantJobsLoading = (cycleId = applicantJobsLoadingCycleId) => {
+  const completeLoading = () => {
+    if (cycleId !== applicantJobsLoadingCycleId) return
+    clearApplicantJobsLoadingTimer()
+    jobsLoading.value = false
+  }
+
+  const elapsed = Math.max(0, Date.now() - applicantJobsLoadingStartedAt)
+  const remaining = Math.max(0, APPLICANT_JOBS_LOADING_MIN_MS - elapsed)
+
+  if (!remaining) {
+    completeLoading()
+    return
+  }
+
+  clearApplicantJobsLoadingTimer()
+  applicantJobsLoadingTimerId = window.setTimeout(completeLoading, remaining)
+}
+
 const openHelpCenter = () => {
+  isApplicantSettingsModalOpen.value = false
   if (!canViewApplicantModule('help-center')) {
     notify('Help Center access is currently disabled by admin RBAC.', 'warning', 'Access unavailable')
     return
@@ -288,7 +332,41 @@ const openHelpCenter = () => {
 }
 
 const openTermsAndPolicies = () => {
+  isApplicantSettingsModalOpen.value = false
   router.push('/support/terms-of-use')
+}
+
+const resolveApplicantSettingsReturnSection = () => {
+  const preferredSections = ['find-jobs', 'applications', 'technical-assessment', 'interviews', 'job-offers', 'messages', 'profile']
+  return preferredSections.find((sectionId) => canViewApplicantModule(sectionId)) || 'find-jobs'
+}
+
+const rememberApplicantSettingsReturnSection = () => {
+  const candidate = String(
+    activeSection.value && activeSection.value !== 'settings'
+      ? activeSection.value
+      : applicantSettingsReturnSection.value,
+  ).trim()
+
+  applicantSettingsReturnSection.value = candidate && candidate !== 'settings' && canViewApplicantModule(candidate)
+    ? candidate
+    : resolveApplicantSettingsReturnSection()
+}
+
+const closeApplicantSettings = (nextSection = '') => {
+  isApplicantSettingsModalOpen.value = false
+
+  const requestedSection = String(nextSection || '').trim()
+  if (requestedSection && requestedSection !== 'settings' && canViewApplicantModule(requestedSection)) {
+    applicantSettingsReturnSection.value = requestedSection
+    activeSection.value = requestedSection
+    return
+  }
+
+  const fallbackSection = String(applicantSettingsReturnSection.value || '').trim()
+  activeSection.value = fallbackSection && fallbackSection !== 'settings' && canViewApplicantModule(fallbackSection)
+    ? fallbackSection
+    : resolveApplicantSettingsReturnSection()
 }
 
 const openPersonalization = () => {
@@ -296,13 +374,53 @@ const openPersonalization = () => {
     notify('Profile access is currently disabled by admin RBAC.', 'warning', 'Access unavailable')
     return
   }
+  isApplicantSettingsModalOpen.value = false
   activeSection.value = 'profile'
+}
+
+const openApplicantSettings = () => {
+  if (!canViewApplicantModule('settings')) {
+    notify('Settings access is currently disabled by admin RBAC.', 'warning', 'Access unavailable')
+    return
+  }
+  rememberApplicantSettingsReturnSection()
+  isApplicantSettingsModalOpen.value = true
+  activeSection.value = 'settings'
+}
+
+const selectSection = (sectionId) => {
+  const targetSection = String(sectionId || '').trim()
+  if (!targetSection) return
+
+  if (targetSection === 'profile') {
+    openPersonalization()
+    return
+  }
+
+  if (targetSection === 'settings') {
+    openApplicantSettings()
+    return
+  }
+
+  isApplicantSettingsModalOpen.value = false
+  if (canViewApplicantModule(targetSection)) {
+    activeSection.value = targetSection
+    return
+  }
+
+  activeSection.value = resolveFirstAvailableApplicantSection()
 }
 
 const handleApplicantNotificationOpen = (notification) => {
   const targetSection = String(notification?.section || '').trim()
-  if (['applications', 'interviews', 'technical-assessment', 'find-jobs', 'overview', 'messages', 'profile', 'settings'].includes(targetSection)
+  if (targetSection === 'settings') {
+    openApplicantSettings()
+    return
+  }
+
+  if (['applications', 'interviews', 'job-offers', 'technical-assessment', 'find-jobs', 'messages', 'profile', 'settings'].includes(targetSection)
     && canViewApplicantModule(targetSection)) {
+    isApplicantSettingsModalOpen.value = false
     activeSection.value = targetSection
     return
   }
@@ -311,21 +429,18 @@ const handleApplicantNotificationOpen = (notification) => {
 }
 
 const applicantSidebarItemsCatalog = [
-  { id: 'overview', label: 'Dashboard', icon: 'bi bi-grid' },
-  { id: 'messages', label: 'Messages', icon: 'bi bi-chat-dots' },
-  { id: 'find-jobs', label: 'Find Jobs', icon: 'bi bi-search' },
-  { id: 'applications', label: 'My Applications', icon: 'bi bi-file-earmark-text' },
-  { id: 'technical-assessment', label: 'Technical Assessment', icon: 'bi bi-ui-checks-grid' },
-  { id: 'interviews', label: 'Interviews', icon: 'bi bi-calendar-check' },
+  { id: 'find-jobs', label: 'Find Jobs', icon: 'bi bi-search', description: 'Browse job matches that fit your profile and skills.' },
+  { id: 'applications', label: 'My Applications', icon: 'bi bi-file-earmark-text', description: 'Track every application and hiring status in one place.' },
+  { id: 'technical-assessment', label: 'Technical Assessment', icon: 'bi bi-ui-checks-grid', description: 'Open assigned assessments and check your results.' },
+  { id: 'interviews', label: 'Interviews', icon: 'bi bi-calendar-check', description: 'Review schedules, confirmations, and interview updates.' },
+  { id: 'job-offers', label: 'Job Offers', icon: 'bi bi-briefcase', description: 'Review accepted offers and final hiring updates.' },
+  { id: 'messages', label: 'Inbox', icon: 'bi bi-inbox', description: 'Check employer messages and conversation updates in one inbox.' },
 ]
 
 const sidebarSettingsItem = { id: 'settings', label: 'Settings', icon: 'bi bi-sliders2' }
 const sidebarItems = computed(() =>
   applicantSidebarItemsCatalog.filter((item) => canViewApplicantModule(item.id)),
 )
-const showApplicantProfileItem = computed(() => canViewApplicantModule('profile'))
-const showApplicantSettingsItem = computed(() => canViewApplicantModule('settings'))
-const showApplicantHelpCenterItem = computed(() => canViewApplicantModule('help-center'))
 const currentSidebarItem = computed(() => {
   if (activeSection.value === 'profile' && canViewApplicantModule('profile')) {
     return { id: 'profile', label: 'My Profile', icon: 'bi bi-person-circle' }
@@ -335,8 +450,13 @@ const currentSidebarItem = computed(() => {
   }
   return sidebarItems.value.find((item) => item.id === activeSection.value)
     || sidebarItems.value[0]
-    || (showApplicantProfileItem.value ? { id: 'profile', label: 'My Profile', icon: 'bi bi-person-circle' } : sidebarSettingsItem)
+    || (canViewApplicantModule('profile') ? { id: 'profile', label: 'My Profile', icon: 'bi bi-person-circle' } : sidebarSettingsItem)
 })
+const applicantRenderedSection = computed(() => (
+  activeSection.value === 'settings'
+    ? applicantSettingsReturnSection.value || resolveApplicantSettingsReturnSection()
+    : activeSection.value
+))
 
 const registration = computed(() => authUser.value?.applicant_registration || authUser.value?.applicantRegistration || null)
 const applicantFirstName = computed(() => registration.value?.first_name || authUser.value?.name?.split(' ')?.[0] || 'Applicant')
@@ -506,48 +626,6 @@ const banDurationLabel = computed(() => {
     minute: '2-digit',
   })
 })
-
-const _legacyNotifications = computed(() => [
-  {
-    id: 1,
-    title: 'Your application was viewed',
-    copy: 'Inclusive Business Solutions opened your Administrative Assistant application today.',
-    tone: 'success',
-  },
-  {
-    id: 2,
-    title: 'New job post available',
-    copy: 'A new Customer Support role is now open and may fit your current strengths and preferences.',
-    tone: 'accent',
-  },
-  {
-    id: 3,
-    title: 'Interview scheduled',
-    copy: 'AccessWorks Contact Center requested a preliminary interview this week.',
-    tone: 'neutral',
-  },
-])
-const _legacySkillsInsight = computed(() => ({
-  strengths: ['Communication', 'Encoding', 'Customer Service', 'Document Organization'],
-  missing: ['Microsoft Excel', 'Calendar Management', 'CRM Familiarity'],
-}))
-const _legacyMessagesPreview = computed(() => ({
-  unreadCount: 2,
-  items: [
-    {
-      id: 1,
-      employer: 'Inclusive Business Solutions',
-      message: 'We reviewed your profile and would like to confirm your availability this Friday.',
-      time: '10 mins ago',
-    },
-    {
-      id: 2,
-      employer: 'City Wellness Hub',
-      message: 'Please update your resume file before we proceed to the next screening step.',
-      time: '1 hour ago',
-    },
-  ],
-}))
 
 const normalizeApplicantInterviewScheduleState = (value) =>
   String(value || 'scheduled').trim().toLowerCase()
@@ -1016,8 +1094,7 @@ const mapJobRecordToApplicantJob = (raw) => {
   const createdAtRaw = String(raw?.createdAt || raw?.created_at || '').trim()
   const createdAtMs = createdAtRaw ? Date.parse(createdAtRaw) : 0
   const companyName = String(raw?.companyName || raw?.company || raw?.department || 'Company').trim()
-
-  return {
+  const jobRecord = {
     id,
     title,
     companyName,
@@ -1046,32 +1123,13 @@ const mapJobRecordToApplicantJob = (raw) => {
         ? new Date(createdAtMs).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
         : new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }),
   }
+
+  return {
+    ...jobRecord,
+    matchScore: getApplicantJobMatchScore(jobRecord),
+  }
 }
 
-const applicantJobSuggestions = computed(() => {
-  const suggestionSet = new Set()
-  const seeded = [
-    registration.value?.disability_type,
-    'Programmer',
-    'Software Engineer',
-    'Photographer',
-    'Digital Marketing',
-  ]
-
-  seeded.forEach((value) => {
-    const normalized = String(value || '').trim()
-    if (normalized) suggestionSet.add(normalized)
-  })
-
-  publicJobs.value.forEach((job) => {
-    ;[job.category, job.title].forEach((value) => {
-      const normalized = String(value || '').trim()
-      if (normalized) suggestionSet.add(normalized)
-    })
-  })
-
-  return [...suggestionSet].slice(0, 6)
-})
 const applicantDisabilityMatch = computed(() => {
   return normalizeApplicantJobDisabilityCategory(registration.value?.disability_type || '')
 })
@@ -1105,47 +1163,6 @@ const applicantJobSortLabel = computed(() => {
   const matchingOption = APPLICANT_JOB_SORT_OPTIONS.find((option) => option.value === applicantJobSortMode.value)
   return matchingOption?.label || 'Strongest match'
 })
-const applicantJobFilterLabel = computed(() => {
-  if (applicantJobFilterMode.value === 'matched') {
-    return 'Job matching'
-  }
-
-  if (applicantJobFilterMode.value === 'pwd') {
-    const matchingOption = applicantJobPwdTypeOptions.value.find((option) => option.value === applicantJobPwdType.value)
-    return matchingOption?.label || 'PWD type'
-  }
-
-  if (applicantJobFilterMode.value === 'salary') {
-    const matchingOption = applicantJobSalaryOptions.value.find((option) => option.value === applicantJobSalaryRange.value)
-    return matchingOption?.value ? `Salary: ${matchingOption.label}` : 'Salary range'
-  }
-
-  return 'All jobs'
-})
-const applicantJobResultsDescription = computed(() => {
-  const sortDescription = applicantJobSortMode.value === 'newest'
-    ? 'sorted by newest posts first'
-    : 'sorted by the strongest match first'
-
-  if (applicantJobFilterMode.value === 'matched') {
-    return applicantDisabilityMatch.value
-      ? `Showing live public job posts that match the applicant profile, ${sortDescription}. Click an active filter again to return here.`
-      : `Showing live public job posts for applicants, ${sortDescription}. Add a disability type to make job matching more specific.`
-  }
-
-  if (applicantJobFilterMode.value === 'pwd') {
-    return `Showing live public job posts filtered by ${applicantJobFilterLabel.value}, ${sortDescription}.`
-  }
-
-  if (applicantJobFilterMode.value === 'salary') {
-    return applicantJobSalaryRange.value
-      ? `Showing live public job posts filtered by ${applicantJobFilterLabel.value.toLowerCase()}, ${sortDescription}.`
-      : 'Choose a salary range from the filter menu to narrow the results.'
-  }
-
-  return `Showing every live public job post, ${sortDescription}. Use the filter menu to narrow by PWD type or salary range.`
-})
-
 const getDefaultApplicantJobPwdType = () =>
   applicantDisabilityMatch.value || applicantJobPwdTypeOptions.value[0]?.value || ''
 
@@ -1156,8 +1173,8 @@ const setApplicantJobFilterMode = (value) => {
   const nextMode = String(value || '').trim().toLowerCase()
   if (!APPLICANT_JOB_FILTER_MODES.includes(nextMode)) return
 
-  if (nextMode !== 'matched' && applicantJobFilterMode.value === nextMode) {
-    applicantJobFilterMode.value = 'matched'
+  if (nextMode !== 'all' && applicantJobFilterMode.value === nextMode) {
+    applicantJobFilterMode.value = 'all'
     return
   }
 
@@ -1523,7 +1540,7 @@ const formatApplicantNotificationTime = (value) => {
   const timestamp = typeof value === 'number' ? value : Date.parse(String(value || '').trim())
   if (!Number.isFinite(timestamp) || timestamp <= 0) return 'Just now'
 
-  const now = Date.now()
+  const now = applicantRealtimeNow.value
   const diffMs = Math.max(0, now - timestamp)
   const diffMinutes = Math.round(diffMs / (60 * 1000))
   if (diffMinutes < 1) return 'Just now'
@@ -1746,6 +1763,9 @@ const buildApplicantApplicationTimeline = (record) => {
   const initialInterview = getApplicantInterviewRecordForApplication(record, 'initial')
   const finalInterview = getApplicantInterviewRecordForApplication(record, 'final')
   const hasAdvancedPastApplicationStage = isInterviewApplicationStatus(normalizedStatus)
+  const hasApprovedApplication = isApprovedApplicationStatus(normalizedStatus)
+  const hasCompletedJobOffer = ['accepted', 'hired'].includes(normalizedStatus)
+  const hasRejectedApplication = isRejectedApplicationStatus(normalizedStatus)
   const applicationTone = isApprovedApplicationStatus(normalizedStatus)
     ? 'success'
     : isRejectedApplicationStatus(normalizedStatus)
@@ -1800,6 +1820,36 @@ const buildApplicantApplicationTimeline = (record) => {
   const trainingProgressStatus = String(linkedTrainingAssignment?.progressStatus || '').trim().toLowerCase()
   const hasCompletedTrainingMonitoring = Boolean(linkedTrainingAssignment?.trainingCompletedAt)
     || trainingProgressStatus === 'completed'
+  const hasCompletedFinalInterview = normalizeApplicantInterviewScheduleState(
+    finalInterview?.scheduleStatus || finalInterview?.schedule_status,
+  ) === 'completed'
+  const jobOfferLabel = hasCompletedJobOffer
+    ? 'Offer Accepted'
+    : hasRejectedApplication
+      ? 'Job Offer Closed'
+      : isDiscontinued
+        ? 'Job Offer Closed'
+        : hasApprovedApplication
+          ? 'Job Offer Pending'
+        : 'Job Offer'
+  const jobOfferTone = hasCompletedJobOffer
+    ? 'success'
+    : hasRejectedApplication
+      ? 'danger'
+      : isDiscontinued
+        ? 'muted'
+        : 'warning'
+  const jobOfferMeta = hasCompletedJobOffer
+    ? 'Your application moved to the job offer stage and has already been accepted.'
+    : hasRejectedApplication
+      ? rejectionReason || 'No job offer was issued for this application.'
+      : isDiscontinued
+        ? 'Job offer will not continue because this application was discontinued.'
+        : hasApprovedApplication
+          ? 'Your application was approved, but no formal job offer has been sent yet.'
+        : hasCompletedFinalInterview
+          ? 'Final interview completed. Waiting for the business owner to send a job offer.'
+          : 'Job offer becomes available after the final interview stage.'
   const trainingLabel = linkedTrainingAssignment
     ? hasCompletedTrainingMonitoring
       ? 'Training Completed'
@@ -1862,6 +1912,12 @@ const buildApplicantApplicationTimeline = (record) => {
         : isDiscontinued
           ? 'Final interview will not continue because this application was discontinued.'
           : 'Final interview not scheduled yet.',
+    },
+    {
+      id: `job-offer-${String(record?.id || '').trim()}`,
+      label: jobOfferLabel,
+      tone: jobOfferTone,
+      meta: jobOfferMeta,
     },
     {
       id: `training-${String(record?.id || '').trim()}`,
@@ -2021,6 +2077,170 @@ const applicantTechnicalAssessmentRecords = computed(() =>
     .map(mapApplicantAssessmentAssignmentRecord)
     .sort((left, right) => right.assignedAtValue - left.assignedAtValue),
 )
+
+const applicantInboxItems = computed(() => {
+  const recentThreshold = applicantRealtimeNow.value - (1000 * 60 * 60 * 24 * 3)
+
+  const applicationItems = visibleApplicantApplications.value
+    .map((record) => {
+      const companyLabel = getApplicationCompanyLabel(record)
+      const jobTitle = getApplicationJobTitle(record)
+      const statusLabel = formatApplicationStatusLabel(record)
+      const createdAtValue = getApplicationStatusTimestamp(record)
+      const description = resolveApplicationStatusDescription(record)
+      const rejectionReason = String(record?.rejectionReason || record?.rejection_reason || '').trim()
+
+      return {
+        id: `applicant-inbox-application-${String(record?.id || '').trim()}`,
+        sender: companyLabel,
+        senderMeta: jobTitle,
+        subject: `${statusLabel}: ${jobTitle}`,
+        preview: description,
+        body: [
+          `${companyLabel} sent an update for your ${jobTitle} application.`,
+          description,
+          rejectionReason ? `Employer note: ${rejectionReason}` : '',
+        ].filter(Boolean),
+        meta: [
+          { label: 'Mailbox', value: 'Applications' },
+          { label: 'Job', value: jobTitle },
+          { label: 'Status', value: statusLabel },
+          { label: 'Updated', value: formatApplicantNotificationTime(createdAtValue) },
+        ],
+        section: 'applications',
+        sectionLabel: APPLICANT_MODULE_LABELS.applications,
+        category: 'Application Update',
+        actionLabel: 'Open My Applications',
+        tone: formatApplicationStatusTone(record),
+        icon: 'bi bi-briefcase',
+        createdAtValue,
+        timeLabel: formatApplicantNotificationTime(createdAtValue),
+        isUnread: createdAtValue >= recentThreshold,
+      }
+    })
+    .filter((item) => item.id !== 'applicant-inbox-application-')
+
+  const interviewItems = liveApplicantInterviewSchedules.value
+    .filter((record) =>
+      activeApplicantApplicationIdSet.value.has(String(record?.applicationId || record?.application_id || '').trim()))
+    .map((record) => {
+      const companyLabel = String(record?.workspaceOwnerName || record?.workspace_owner_name || 'Employer').trim() || 'Employer'
+      const jobTitle = String(record?.jobTitle || record?.job_title || 'Applied Job').trim() || 'Applied Job'
+      const interviewTypeLabel = formatApplicantInterviewTypeLabel(record?.interviewType || record?.interview_type || 'initial')
+      const interviewStatusLabel = formatApplicantInterviewStatusLabelFromRecord(record)
+      const createdAtValue = getApplicantInterviewRecordActivityTime(record)
+
+      return {
+        id: `applicant-inbox-interview-${String(record?.id || '').trim()}`,
+        sender: companyLabel,
+        senderMeta: jobTitle,
+        subject: `${interviewTypeLabel}: ${jobTitle}`,
+        preview: getApplicantInterviewTimelineMeta(record),
+        body: [
+          `${companyLabel} updated your ${jobTitle} interview schedule.`,
+          getApplicantInterviewTimelineMeta(record),
+        ],
+        meta: [
+          { label: 'Mailbox', value: 'Interviews' },
+          { label: 'Interview', value: interviewTypeLabel },
+          { label: 'Status', value: interviewStatusLabel },
+          { label: 'Schedule', value: formatApplicantInterviewScheduleLabel(record?.scheduledAt || record?.scheduled_at) },
+          { label: 'Mode', value: formatApplicantInterviewModeLabel(record?.interviewMode || record?.interview_mode) },
+        ],
+        section: 'interviews',
+        sectionLabel: APPLICANT_MODULE_LABELS.interviews,
+        category: 'Interview Notice',
+        actionLabel: 'Open Interviews',
+        tone: getApplicantInterviewStatusToneFromRecord(record),
+        icon: 'bi bi-camera-video',
+        createdAtValue,
+        timeLabel: formatApplicantNotificationTime(createdAtValue),
+        isUnread: createdAtValue >= recentThreshold,
+      }
+    })
+    .filter((item) => item.id !== 'applicant-inbox-interview-')
+
+  const assessmentItems = applicantTechnicalAssessmentRecords.value
+    .map((record) => {
+      const createdAtValue = record.assignedAtValue || Date.parse(String(record?.submittedAt || '').trim()) || 0
+      const preview = record.isCancelled
+        ? record.cancellationReason || `${record.company} discontinued the technical assessment for ${record.jobTitle}.`
+        : record.isSubmitted
+          ? record.assessmentResult === 'passed'
+            ? `${record.company} received your answers for ${record.jobTitle}. You passed with ${record.scoreLabel}.`
+            : record.assessmentResult === 'failed'
+              ? `${record.company} received your answers for ${record.jobTitle}. You did not reach the passing score.`
+              : `${record.company} received your submitted technical assessment for ${record.jobTitle}.`
+          : record.isStarted
+            ? `${record.company} is waiting for you to finish the technical assessment for ${record.jobTitle}.`
+            : `${record.company} assigned a technical assessment for your ${record.jobTitle} application.`
+
+      return {
+        id: `applicant-inbox-assessment-${String(record?.id || '').trim()}`,
+        sender: record.company,
+        senderMeta: record.jobTitle,
+        subject: `${record.title}: ${record.jobTitle}`,
+        preview,
+        body: [
+          `${record.company} sent a technical assessment update for your ${record.jobTitle} application.`,
+          preview,
+          record.instructions ? `Instructions: ${record.instructions}` : '',
+        ].filter(Boolean),
+        meta: [
+          { label: 'Mailbox', value: 'Technical Assessment' },
+          { label: 'Assessment', value: record.title },
+          { label: 'Status', value: record.statusLabel },
+          { label: 'Score', value: record.scoreLabel },
+          { label: 'Assigned', value: record.assignedAtLabel || 'Recently assigned' },
+        ],
+        section: 'technical-assessment',
+        sectionLabel: APPLICANT_MODULE_LABELS['technical-assessment'],
+        category: 'Assessment Update',
+        actionLabel: 'Open Technical Assessment',
+        tone: record.statusTone,
+        icon: 'bi bi-ui-checks-grid',
+        createdAtValue,
+        timeLabel: formatApplicantNotificationTime(createdAtValue),
+        isUnread: createdAtValue >= recentThreshold,
+      }
+    })
+    .filter((item) => item.id !== 'applicant-inbox-assessment-')
+
+  const accessUpdateItems = applicantAdminAccessNotifications.value
+    .map((notice) => ({
+      id: `applicant-inbox-admin-${String(notice?.id || '').trim()}`,
+      sender: 'PWD Platform',
+      senderMeta: 'Workspace access',
+      subject: String(notice?.title || 'Access update').trim() || 'Access update',
+      preview: String(notice?.copy || '').trim(),
+      body: [
+        'Your applicant workspace permissions were updated.',
+        String(notice?.copy || '').trim(),
+      ].filter(Boolean),
+      meta: [
+        { label: 'Mailbox', value: 'Workspace Updates' },
+        { label: 'Section', value: APPLICANT_MODULE_LABELS[String(notice?.section || '').trim()] || String(notice?.section || 'Workspace').trim() || 'Workspace' },
+        { label: 'Module', value: APPLICANT_MODULE_LABELS[String(notice?.moduleId || '').trim()] || String(notice?.moduleId || 'Workspace').trim() || 'Workspace' },
+        { label: 'Posted', value: String(notice?.timeLabel || 'Recently').trim() || 'Recently' },
+      ],
+      section: String(notice?.section || 'settings').trim() || 'settings',
+      sectionLabel: APPLICANT_MODULE_LABELS[String(notice?.section || 'settings').trim()] || 'Settings',
+      category: 'Workspace Update',
+      actionLabel: canViewApplicantModule(String(notice?.section || 'settings').trim() || 'settings')
+        ? `Open ${APPLICANT_MODULE_LABELS[String(notice?.section || 'settings').trim()] || 'Section'}`
+        : '',
+      tone: String(notice?.tone || 'warning').trim() || 'warning',
+      icon: 'bi bi-shield-check',
+      createdAtValue: Number(notice?.createdAtValue || 0) || 0,
+      timeLabel: String(notice?.timeLabel || 'Recently').trim() || 'Recently',
+      isUnread: Number(notice?.createdAtValue || 0) >= recentThreshold,
+    }))
+    .filter((item) => item.id !== 'applicant-inbox-admin-')
+
+  return [...applicationItems, ...interviewItems, ...assessmentItems, ...accessUpdateItems]
+    .sort((left, right) => (right?.createdAtValue || 0) - (left?.createdAtValue || 0))
+})
+
 const seenApplicantAssessmentIds = ref([])
 const hasApplicantAssessmentFeedHydrated = ref(false)
 
@@ -2319,7 +2539,6 @@ const applicantNotifications = computed(() => {
     .slice(0, 8)
 })
 
-const notificationCount = computed(() => applicantNotifications.value.length)
 const waitForApplicantAuthReady = () =>
   typeof auth?.authStateReady === 'function' ? auth.authStateReady() : Promise.resolve()
 const buildApplicantApplicationLookupTargets = (user) => {
@@ -2379,7 +2598,7 @@ const loadApplicantApplicationStats = async (user) => {
 }
 
 const loadApplicantJobs = async () => {
-  jobsLoading.value = true
+  const loadingCycleId = beginApplicantJobsLoading()
   try {
     const rows = await getPublicJobs()
     const mapped = (Array.isArray(rows) ? rows : []).map(mapJobRecordToApplicantJob).filter(Boolean)
@@ -2391,7 +2610,7 @@ const loadApplicantJobs = async () => {
     publicJobs.value = []
     selectedFindJobId.value = ''
   } finally {
-    jobsLoading.value = false
+    finishApplicantJobsLoading(loadingCycleId)
   }
 }
 
@@ -2443,6 +2662,36 @@ const applicantApplicationRecords = computed(() =>
     .sort((left, right) => (right.lastUpdatedValue || right.submittedAtValue) - (left.lastUpdatedValue || left.submittedAtValue)),
 )
 
+const applicantJobOfferRecords = computed(() =>
+  visibleApplicantApplications.value
+    .filter((record) => ['accepted', 'hired'].includes(normalizeApplicationStatus(record)))
+    .map((record) => {
+      const normalizedStatus = normalizeApplicationStatus(record)
+      const company = getApplicationCompanyLabel(record)
+      const title = getApplicationJobTitle(record)
+      const updatedAtValue = getApplicationStatusTimestamp(record)
+
+      return {
+        id: String(record?.id || `${title}-${company}-${updatedAtValue}`),
+        title,
+        company,
+        location: getApplicationLocationLabel(record),
+        jobType: getApplicationTypeLabel(record),
+        salaryLabel: getApplicationSalaryLabel(record),
+        disabilityLabel: getApplicationDisabilityLabel(record),
+        submittedAtLabel: formatApplicationDate(record),
+        updatedAtLabel: formatApplicationStatusDate(record),
+        updatedAtValue,
+        offerLabel: normalizedStatus === 'hired' ? 'Hired' : 'Offer Accepted',
+        offerTone: 'success',
+        offerSummary: normalizedStatus === 'hired'
+          ? `${company} marked your ${title} application as hired.`
+          : `You accepted the job offer for ${title} from ${company}.`,
+      }
+    })
+    .sort((left, right) => (right.updatedAtValue || 0) - (left.updatedAtValue || 0)),
+)
+
 watch(visibleApplicantApplications, (records) => {
   applicantApplicationStats.value = summarizeApplicantApplications(records)
 }, { immediate: true })
@@ -2457,10 +2706,6 @@ const handleDeleteApplicantApplications = async (applicationIds = []) => {
   }
 
   const applicationLabel = normalizedApplicationIds.length === 1 ? 'application' : 'applications'
-  const shouldDelete = typeof window === 'undefined'
-    ? true
-    : window.confirm(`Delete ${normalizedApplicationIds.length} ${applicationLabel} from My Applications?`)
-  if (!shouldDelete) return
 
   isApplicantApplicationDeleteSubmitting.value = true
 
@@ -2550,15 +2795,18 @@ const syncApplicantApplicationMirror = async (applicationId, payload = {}) => {
   }
 }
 
-const startApplicantTechnicalAssessment = async (assignmentId) => {
-  const targetAssignment = getLiveApplicantAssessmentAssignmentById(assignmentId)
+const startApplicantTechnicalAssessment = async (payload) => {
+  const input = typeof payload === 'string' ? { assessmentId: payload } : (payload || {})
+  const targetAssignment = getLiveApplicantAssessmentAssignmentById(input.assessmentId)
   if (!targetAssignment?.id || !targetAssignment?.workspaceOwnerId) {
+    if (typeof input.onError === 'function') input.onError('This technical assessment could not be opened right now.')
     notify('This technical assessment could not be opened right now.', 'error')
     return
   }
 
   const normalizedStatus = normalizeApplicantAssessmentStatus(targetAssignment)
   if (isCancelledApplicantAssessmentStatus(normalizedStatus)) {
+    if (typeof input.onError === 'function') input.onError(getApplicantAssessmentCancellationReason(targetAssignment))
     notify(getApplicantAssessmentCancellationReason(targetAssignment), 'warning')
     return
   }
@@ -2575,20 +2823,28 @@ const startApplicantTechnicalAssessment = async (assignmentId) => {
         technicalAssessmentStatus: 'in_progress',
       })
     }
+    if (typeof input.onSuccess === 'function') input.onSuccess()
   } catch (error) {
-    notify(error instanceof Error ? error.message : 'Unable to open this technical assessment right now.', 'error')
+    const message = error instanceof Error ? error.message : 'Unable to open this technical assessment right now.'
+    if (typeof input.onError === 'function') input.onError(message)
+    notify(message, 'error')
   }
 }
 
-const submitApplicantTechnicalAssessment = async ({ assessmentId, responses }) => {
+const submitApplicantTechnicalAssessment = async (payload = {}) => {
+  const input = payload || {}
+  const assessmentId = String(input?.assessmentId || '').trim()
+  const responses = input?.responses
   const targetAssignment = getLiveApplicantAssessmentAssignmentById(assessmentId)
   if (!targetAssignment?.id || !targetAssignment?.workspaceOwnerId) {
+    if (typeof input.onError === 'function') input.onError('This technical assessment could not be submitted right now.')
     notify('This technical assessment could not be submitted right now.', 'error')
     return
   }
 
   const normalizedStatus = normalizeApplicantAssessmentStatus(targetAssignment)
   if (isCancelledApplicantAssessmentStatus(normalizedStatus)) {
+    if (typeof input.onError === 'function') input.onError(getApplicantAssessmentCancellationReason(targetAssignment))
     notify(getApplicantAssessmentCancellationReason(targetAssignment), 'warning')
     return
   }
@@ -2597,6 +2853,7 @@ const submitApplicantTechnicalAssessment = async ({ assessmentId, responses }) =
     const normalizedResponses = normalizeApplicantAssessmentResponses(responses)
     const scoreSummary = evaluateApplicantAssessmentSubmission(targetAssignment, normalizedResponses)
     const submittedAt = new Date().toISOString()
+    let didSyncApplicationFailure = false
     await saveBusinessAssessmentAssignmentRecord({
       ...targetAssignment,
       assignmentStatus: 'Submitted',
@@ -2612,14 +2869,50 @@ const submitApplicantTechnicalAssessment = async ({ assessmentId, responses }) =
       responses: normalizedResponses,
     })
     if (targetAssignment.applicationId) {
-      await syncApplicantApplicationMirror(targetAssignment.applicationId, {
+      const mirrorPayload = {
         technicalAssessmentStatus: 'submitted',
         technicalAssessmentResult: scoreSummary.assessmentResult,
         technicalAssessmentScoreValue: scoreSummary.scoreValue,
         technicalAssessmentScoreLabel: scoreSummary.scoreLabel,
         technicalAssessmentSubmittedAt: submittedAt,
+      }
+
+      if (scoreSummary.assessmentResult === 'failed') {
+        mirrorPayload.status = 'rejected'
+        mirrorPayload.rejectionReason = `You did not reach the ${scoreSummary.passingScorePercent}% passing score for the technical assessment.`
+      }
+
+      didSyncApplicationFailure = await syncApplicantApplicationMirror(targetAssignment.applicationId, mirrorPayload)
+    }
+
+    const submissionTitle = scoreSummary.assessmentResult === 'passed'
+      ? 'Technical assessment passed'
+      : scoreSummary.assessmentResult === 'failed'
+        ? 'Technical assessment failed'
+        : 'Technical assessment submitted'
+    const submissionMessage = scoreSummary.assessmentResult === 'passed'
+      ? `You passed with ${scoreSummary.scoreLabel}.`
+      : scoreSummary.assessmentResult === 'failed'
+        ? `You scored ${scoreSummary.scoreLabel}, below the ${scoreSummary.passingScorePercent}% passing score.`
+        : `Your answers for ${String(targetAssignment.jobTitle || 'this application').trim() || 'this application'} were submitted successfully.`
+    const submissionFootnote = scoreSummary.assessmentResult === 'failed'
+      ? didSyncApplicationFailure
+        ? 'Your linked application was marked as failed because the assessment score did not meet the passing requirement.'
+        : 'Your answers are now locked while the employer reviews the failed result.'
+      : 'Your answers are now locked and saved in your assessment history.'
+
+    if (typeof input.onSuccess === 'function') {
+      input.onSuccess({
+        tone: scoreSummary.assessmentResult === 'failed' ? 'danger' : 'success',
+        title: submissionTitle,
+        message: submissionMessage,
+        footnote: submissionFootnote,
+        scoreLabel: scoreSummary.scoreLabel,
+        passMark: `${scoreSummary.passingScorePercent}%`,
+        applicationOutcome: scoreSummary.assessmentResult === 'failed' && didSyncApplicationFailure ? 'rejected' : '',
       })
     }
+
     notify(
       scoreSummary.assessmentResult === 'passed'
         ? `Technical assessment submitted. You passed with ${scoreSummary.scoreLabel}.`
@@ -2630,7 +2923,9 @@ const submitApplicantTechnicalAssessment = async ({ assessmentId, responses }) =
       'Assessment submitted',
     )
   } catch (error) {
-    notify(error instanceof Error ? error.message : 'Unable to submit this technical assessment right now.', 'error')
+    const message = error instanceof Error ? error.message : 'Unable to submit this technical assessment right now.'
+    if (typeof input.onError === 'function') input.onError(message)
+    notify(message, 'error')
   }
 }
 
@@ -2780,10 +3075,11 @@ const startApplicantRealtimeSubscriptions = (user) => {
   stopApplicantInterviewSchedulesSubscription?.()
   stopApplicantAssessmentAssignmentsSubscription?.()
   stopApplicantTrainingAssignmentsSubscription?.()
+  const loadingCycleId = beginApplicantJobsLoading()
 
   stopPublicJobsSubscription = subscribeToPublicJobs(
     (rows) => {
-      jobsLoading.value = false
+      finishApplicantJobsLoading(loadingCycleId)
       const mapped = (Array.isArray(rows) ? rows : []).map(mapJobRecordToApplicantJob).filter(Boolean)
       publicJobs.value = mapped
       if (selectedFindJobId.value && !mapped.some((job) => job.id === selectedFindJobId.value)) {
@@ -2791,7 +3087,7 @@ const startApplicantRealtimeSubscriptions = (user) => {
       }
     },
     () => {
-      jobsLoading.value = false
+      finishApplicantJobsLoading(loadingCycleId)
       publicJobs.value = []
     },
   )
@@ -2881,10 +3177,6 @@ const selectFindJob = (jobId) => {
   markApplicantJobViewed(normalizedJobId)
 }
 
-const closeFindJob = () => {
-  selectedFindJobId.value = ''
-}
-
 const saveApplicantJob = (job) => {
   const targetJob = job || selectedFindJob.value
   if (!targetJob) return
@@ -2951,16 +3243,6 @@ const applyApplicantJob = async (job) => {
   } catch (error) {
     notify(error instanceof Error ? error.message : 'Unable to send your application right now.', 'error')
   }
-}
-
-const applyJobSuggestion = (value) => {
-  const normalized = String(value || '').trim()
-  activeJobSuggestion.value = normalized
-  findJobsQuery.value = normalized
-}
-
-const clearJobSuggestion = () => {
-  activeJobSuggestion.value = ''
 }
 
 const handleApplicantAvatarChange = async (event) => {
@@ -3055,6 +3337,7 @@ const logout = async () => {
 
 const requestLogout = () => {
   if (isLogoutSubmitting.value) return
+  isApplicantSettingsModalOpen.value = false
   isLogoutConfirmOpen.value = true
 }
 
@@ -3156,7 +3439,7 @@ onMounted(() => {
   }, 10000)
   applicantAccessRealtimeTimerId = window.setInterval(() => {
     applicantRealtimeNow.value = Date.now()
-  }, 1000)
+  }, APPLICANT_REALTIME_UI_REFRESH_MS)
 })
 
 onBeforeUnmount(() => {
@@ -3180,13 +3463,25 @@ watch(
   () => {
     if (!authUser.value?.id) return
     if (activeSection.value === 'profile' && canViewApplicantModule('profile')) return
-    if (activeSection.value === 'settings' && canViewApplicantModule('settings')) return
+    if (activeSection.value === 'settings' && canViewApplicantModule('settings')) {
+      if (!String(applicantSettingsReturnSection.value || '').trim() || applicantSettingsReturnSection.value === 'settings') {
+        applicantSettingsReturnSection.value = resolveApplicantSettingsReturnSection()
+      }
+      return
+    }
     if (activeSection.value && canViewApplicantModule(activeSection.value)) return
 
+    isApplicantSettingsModalOpen.value = false
     activeSection.value = resolveFirstAvailableApplicantSection()
   },
   { deep: true },
 )
+
+watch(activeSection, (sectionId) => {
+  const normalizedSectionId = String(sectionId || '').trim()
+  if (!normalizedSectionId || normalizedSectionId === 'settings') return
+  applicantSettingsReturnSection.value = normalizedSectionId
+})
 
 watch(applicantTechnicalAssessmentRecords, (records) => {
   const recordIds = (Array.isArray(records) ? records : [])
@@ -3219,6 +3514,7 @@ onBeforeUnmount(() => {
   window.clearTimeout(dashboardEntryTimerId)
   window.clearTimeout(welcomeToastTimerId)
   window.clearTimeout(toastTimerId)
+  clearApplicantJobsLoadingTimer()
   stopAuthUserProfileSync?.()
   stopPublicJobsSubscription?.()
   stopApplicantApplicationsSubscription?.()
@@ -3231,7 +3527,20 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="applicant-app" :class="{ 'applicant-app--entering': isDashboardEntering }">
-    <AppToast :toast="toast" @close="toast = null" />
+    <AppToast :toast="toast" position="bottom-left" @close="toast = null" />
+    <ApplicantSettingsModal
+      :open="isApplicantSettingsModalOpen"
+      :applicant-name="applicantName"
+      :applicant-email="applicantEmail"
+      :applicant-initials="applicantInitials"
+      :applicant-joined="applicantJoined"
+      :applicant-disability="applicantDisability"
+      @close="closeApplicantSettings()"
+      @open-profile="openPersonalization"
+      @open-help-center="openHelpCenter"
+      @open-terms="openTermsAndPolicies"
+      @logout="requestLogout"
+    />
 
     <transition name="applicant-welcome-toast">
       <div v-if="welcomeToastName" class="applicant-welcome-toast" role="status" aria-live="polite">
@@ -3304,34 +3613,34 @@ onBeforeUnmount(() => {
 
     <ApplicantSidebar
       :active-section="activeSection"
+      :applicant-name="applicantName"
+      :applicant-email="applicantEmail"
+      :applicant-avatar-url="applicantAvatarUrl"
+      :applicant-initials="applicantInitials"
       :sidebar-items="sidebarItems"
-      :sidebar-settings-item="sidebarSettingsItem"
-      :show-profile-item="showApplicantProfileItem"
-      :show-settings-item="showApplicantSettingsItem"
-      :show-help-center-item="showApplicantHelpCenterItem"
-      @select-section="activeSection = $event"
-      @open-help-center="openHelpCenter"
+      @select-section="selectSection"
     />
 
-    <main class="applicant-main">
+    <main
+      class="applicant-main"
+      :class="{ 'applicant-main--find-jobs': applicantRenderedSection === 'find-jobs' }"
+    >
       <ApplicantNavbar
-        :title="activeSection === 'overview' ? 'Applicant Dashboard' : currentSidebarItem.label"
+        :title="currentSidebarItem.label"
         :applicant-initials="applicantInitials"
         :applicant-first-name="applicantFirstName"
         :applicant-last-name="applicantLastName"
         :applicant-email="applicantEmail"
         :applicant-avatar-url="applicantAvatarUrl"
         :notifications="applicantNotifications"
-        :notification-count="notificationCount"
         @open-notification="handleApplicantNotificationOpen"
         @open-personalization="openPersonalization"
-        @open-help-center="openHelpCenter"
-        @open-terms="openTermsAndPolicies"
+        @open-settings="openApplicantSettings"
         @logout="requestLogout"
       />
 
       <transition name="applicant-page" mode="out-in">
-        <section v-if="activeSection === 'overview'" key="overview" class="applicant-grid applicant-grid--overview">
+        <section v-if="applicantRenderedSection === 'overview'" key="overview" class="applicant-grid applicant-grid--overview">
           <section class="applicant-overview-intro">
             <div class="applicant-overview-intro__copy">
               <p class="applicant-overview-intro__eyebrow">Applicant Dashboard</p>
@@ -3486,18 +3795,19 @@ onBeforeUnmount(() => {
           </section>
         </section>
 
-        <section v-else :key="activeSection" class="applicant-placeholder">
+        <section
+          v-else
+          :key="applicantRenderedSection"
+          class="applicant-placeholder"
+          :class="{ 'applicant-placeholder--find-jobs': applicantRenderedSection === 'find-jobs' }"
+        >
           <ApplicantFindJobs
-            v-if="activeSection === 'find-jobs'"
+            v-if="applicantRenderedSection === 'find-jobs'"
             :jobs-loading="jobsLoading"
             :find-jobs-query="findJobsQuery"
-            :active-job-suggestion="activeJobSuggestion"
-            :applicant-job-suggestions="applicantJobSuggestions"
             :filtered-applicant-jobs="filteredApplicantJobs"
             :applicant-disability="applicantDisability"
             :applicant-job-filter-mode="applicantJobFilterMode"
-            :applicant-job-filter-label="applicantJobFilterLabel"
-            :applicant-job-results-description="applicantJobResultsDescription"
             :applicant-job-pwd-options="applicantJobPwdTypeOptions"
             :applicant-job-pwd-type="applicantJobPwdType"
             :applicant-job-salary-options="applicantJobSalaryOptions"
@@ -3514,16 +3824,13 @@ onBeforeUnmount(() => {
             :selected-find-job="selectedFindJob"
             :should-show-applicant-job-new-tag="shouldShowApplicantJobNewTag"
             @update:find-jobs-query="findJobsQuery = $event"
-            @clear-job-suggestion="clearJobSuggestion"
-            @apply-job-suggestion="applyJobSuggestion"
             @select-find-job="selectFindJob"
-            @close-find-job="closeFindJob"
             @save-applicant-job="saveApplicantJob"
             @apply-applicant-job="applyApplicantJob"
           />
 
           <ApplicantApplications
-            v-else-if="activeSection === 'applications'"
+            v-else-if="applicantRenderedSection === 'applications'"
             :application-records="applicantApplicationRecords"
             :application-stats="applicantApplicationStats"
             :selected-application-ids="selectedApplicantApplicationIds"
@@ -3533,7 +3840,7 @@ onBeforeUnmount(() => {
           />
 
           <ApplicantTechnicalAssessment
-            v-else-if="activeSection === 'technical-assessment'"
+            v-else-if="applicantRenderedSection === 'technical-assessment'"
             :assessment-records="applicantTechnicalAssessmentRecords"
             :has-applications="applicantApplicationRecords.length > 0"
             @start-assessment="startApplicantTechnicalAssessment"
@@ -3541,7 +3848,7 @@ onBeforeUnmount(() => {
           />
 
           <ApplicantMyProfile
-            v-else-if="activeSection === 'profile'"
+            v-else-if="applicantRenderedSection === 'profile'"
             :applicant-name="applicantName"
             :applicant-initials="applicantInitials"
             :applicant-avatar-url="applicantAvatarUrl"
@@ -3561,13 +3868,24 @@ onBeforeUnmount(() => {
             @save-profile="saveApplicantProfile"
           />
 
+          <ApplicantInbox
+            v-else-if="applicantRenderedSection === 'messages'"
+            :inbox-items="applicantInboxItems"
+            @open-section="selectSection"
+          />
+
           <ApplicantInterviews
-            v-else-if="activeSection === 'interviews'"
+            v-else-if="applicantRenderedSection === 'interviews'"
             :interviews="applicantInterviewPageRows"
             :active-action-id="activeApplicantInterviewActionId"
             @confirm-interview="confirmApplicantInterview"
             @request-reschedule="requestApplicantInterviewReschedule"
             @notify="notify($event.text, $event.kind, $event.title)"
+          />
+
+          <ApplicantJobOffers
+            v-else-if="applicantRenderedSection === 'job-offers'"
+            :offer-records="applicantJobOfferRecords"
           />
 
           <div v-else class="applicant-placeholder__card">

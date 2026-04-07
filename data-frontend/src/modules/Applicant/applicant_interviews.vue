@@ -1,19 +1,16 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const props = defineProps({
-  interviews: {
-    type: Array,
-    default: () => [],
-  },
-  activeActionId: {
-    type: String,
-    default: '',
-  },
+  interviews: { type: Array, default: () => [] },
+  activeActionId: { type: String, default: '' },
 })
 
 const emit = defineEmits(['confirm-interview', 'request-reschedule', 'notify'])
 
+const searchQuery = ref('')
+const activeFilter = ref('all')
+const selectedInterviewId = ref('')
 const openRescheduleInterviewId = ref('')
 const rescheduleReason = ref('')
 const requestedScheduleAt = ref('')
@@ -21,12 +18,9 @@ const selectedScheduleOptionByInterviewId = ref({})
 
 const formatInterviewType = (value) =>
   String(value || 'initial').trim().toLowerCase() === 'final' ? 'Final Interview' : 'Initial Interview'
-
 const formatInterviewMode = (value) =>
   String(value || 'in-person').trim().toLowerCase() === 'online' ? 'Online interview' : 'In-person interview'
-
 const normalizeInterviewScheduleStatus = (value) => String(value || 'scheduled').trim().toLowerCase()
-
 const normalizeInterviewResponseStatus = (record = {}) =>
   String(record?.applicantResponseStatus || record?.applicant_response_status || 'pending').trim().toLowerCase() || 'pending'
 const normalizeAvailableScheduleOptions = (record = {}) => {
@@ -36,14 +30,13 @@ const normalizeAvailableScheduleOptions = (record = {}) => {
 }
 
 const formatInterviewStatus = (record = {}) => {
-  const normalizedScheduleStatus = normalizeInterviewScheduleStatus(record?.scheduleStatus || record?.schedule_status)
-  const normalizedResponseStatus = normalizeInterviewResponseStatus(record)
-
-  if (normalizedScheduleStatus === 'completed') return 'Completed'
-  if (normalizedResponseStatus === 'reschedule_rejected') return 'Rejected'
-  if (normalizedScheduleStatus === 'cancelled') return 'Cancelled'
-  if (normalizedResponseStatus === 'confirmed') return 'Confirmed'
-  if (normalizedResponseStatus === 'reschedule_requested') return 'Reschedule Requested'
+  const scheduleStatus = normalizeInterviewScheduleStatus(record?.scheduleStatus || record?.schedule_status)
+  const responseStatus = normalizeInterviewResponseStatus(record)
+  if (scheduleStatus === 'completed') return 'Completed'
+  if (responseStatus === 'reschedule_rejected') return 'Rejected'
+  if (scheduleStatus === 'cancelled') return 'Cancelled'
+  if (responseStatus === 'confirmed') return 'Confirmed'
+  if (responseStatus === 'reschedule_requested') return 'Reschedule Requested'
   return 'Awaiting Confirmation'
 }
 
@@ -62,65 +55,80 @@ const formatInterviewWhen = (value) => {
 const toDateTimeLocalValue = (value) => {
   const parsed = new Date(String(value || ''))
   if (Number.isNaN(parsed.getTime())) return ''
-
   const offset = parsed.getTimezoneOffset()
-  const adjusted = new Date(parsed.getTime() - (offset * 60 * 1000))
-  return adjusted.toISOString().slice(0, 16)
+  return new Date(parsed.getTime() - (offset * 60 * 1000)).toISOString().slice(0, 16)
 }
 
-const minScheduleDateTime = computed(() => {
-  const now = new Date()
-  now.setSeconds(0, 0)
-  const offset = now.getTimezoneOffset()
-  const adjusted = new Date(now.getTime() - (offset * 60 * 1000))
-  return adjusted.toISOString().slice(0, 16)
-})
-
-const statusClass = (record = {}) => {
-  const normalizedScheduleStatus = normalizeInterviewScheduleStatus(record?.scheduleStatus || record?.schedule_status)
-  const normalizedResponseStatus = normalizeInterviewResponseStatus(record)
-
-  if (normalizedScheduleStatus === 'completed' || normalizedResponseStatus === 'confirmed') return 'is-success'
-  if (normalizedScheduleStatus === 'cancelled' || normalizedResponseStatus === 'reschedule_rejected') return 'is-danger'
-  if (normalizedResponseStatus === 'reschedule_requested') return 'is-warning'
-  return 'is-info'
+const parseInterviewTimestamp = (value) => {
+  const parsed = Date.parse(String(value || '').trim())
+  return Number.isFinite(parsed) ? parsed : 0
 }
+
+const getInterviewActivityTime = (record = {}) =>
+  Math.max(
+    parseInterviewTimestamp(record?.updatedAt),
+    parseInterviewTimestamp(record?.updated_at),
+    parseInterviewTimestamp(record?.applicantRespondedAt),
+    parseInterviewTimestamp(record?.applicant_responded_at),
+    parseInterviewTimestamp(record?.businessDecidedAt),
+    parseInterviewTimestamp(record?.business_decided_at),
+    parseInterviewTimestamp(record?.requestedScheduleAt),
+    parseInterviewTimestamp(record?.requested_schedule_at),
+    parseInterviewTimestamp(record?.scheduledAt),
+    parseInterviewTimestamp(record?.scheduled_at),
+    parseInterviewTimestamp(record?.createdAt),
+    parseInterviewTimestamp(record?.created_at),
+  )
+
+const formatInterviewActivityDate = (value) => {
+  const parsed = Number(value) || parseInterviewTimestamp(value)
+  if (!parsed) return 'Recently'
+  return new Date(parsed).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+}
+
+const getInterviewCancellationMessage = (record = {}) =>
+  String(record?.businessDecisionReason || record?.business_decision_reason || '').trim()
+  || 'This interview was cancelled by the business owner.'
 const isCancelledInterview = (record = {}) =>
   normalizeInterviewScheduleStatus(record?.scheduleStatus || record?.schedule_status) === 'cancelled'
 const isCompletedInterview = (record = {}) =>
   normalizeInterviewScheduleStatus(record?.scheduleStatus || record?.schedule_status) === 'completed'
-const getInterviewCancellationMessage = (record = {}) =>
-  String(record?.businessDecisionReason || record?.business_decision_reason || '').trim()
-  || 'This interview was cancelled by the business owner.'
+
+const statusClass = (record = {}) => {
+  const scheduleStatus = normalizeInterviewScheduleStatus(record?.scheduleStatus || record?.schedule_status)
+  const responseStatus = normalizeInterviewResponseStatus(record)
+  if (scheduleStatus === 'completed' || responseStatus === 'confirmed') return 'is-success'
+  if (scheduleStatus === 'cancelled' || responseStatus === 'reschedule_rejected') return 'is-danger'
+  if (responseStatus === 'reschedule_requested') return 'is-warning'
+  return 'is-info'
+}
 
 const canConfirmInterview = (record = {}) => {
-  const normalizedScheduleStatus = normalizeInterviewScheduleStatus(record?.scheduleStatus || record?.schedule_status)
-  const normalizedResponseStatus = normalizeInterviewResponseStatus(record)
-  return !['completed', 'cancelled'].includes(normalizedScheduleStatus)
-    && !['confirmed', 'reschedule_requested'].includes(normalizedResponseStatus)
+  const scheduleStatus = normalizeInterviewScheduleStatus(record?.scheduleStatus || record?.schedule_status)
+  const responseStatus = normalizeInterviewResponseStatus(record)
+  return !['completed', 'cancelled'].includes(scheduleStatus) && !['confirmed', 'reschedule_requested'].includes(responseStatus)
 }
 
 const canRequestReschedule = (record = {}) => {
-  const normalizedScheduleStatus = normalizeInterviewScheduleStatus(record?.scheduleStatus || record?.schedule_status)
-  const normalizedResponseStatus = normalizeInterviewResponseStatus(record)
-  return !['completed', 'cancelled'].includes(normalizedScheduleStatus)
-    && !['confirmed', 'reschedule_requested'].includes(normalizedResponseStatus)
+  const scheduleStatus = normalizeInterviewScheduleStatus(record?.scheduleStatus || record?.schedule_status)
+  const responseStatus = normalizeInterviewResponseStatus(record)
+  return !['completed', 'cancelled'].includes(scheduleStatus) && !['confirmed', 'reschedule_requested'].includes(responseStatus)
 }
 
 const getSelectedScheduleOption = (record = {}) => {
   const interviewId = String(record?.id || '').trim()
   const availableScheduleOptions = normalizeAvailableScheduleOptions(record)
   const selectedValue = String(selectedScheduleOptionByInterviewId.value[interviewId] || '').trim()
-
   if (availableScheduleOptions.includes(selectedValue)) return selectedValue
-  if (availableScheduleOptions.includes(String(record?.scheduledAt || '').trim())) return String(record?.scheduledAt || '').trim()
-  return availableScheduleOptions[0] || String(record?.scheduledAt || '').trim()
+  if (availableScheduleOptions.includes(String(record?.scheduledAt || record?.scheduled_at || '').trim())) {
+    return String(record?.scheduledAt || record?.scheduled_at || '').trim()
+  }
+  return availableScheduleOptions[0] || String(record?.scheduledAt || record?.scheduled_at || '').trim()
 }
 
 const updateSelectedScheduleOption = (interviewId, nextValue) => {
   const normalizedInterviewId = String(interviewId || '').trim()
   if (!normalizedInterviewId) return
-
   selectedScheduleOptionByInterviewId.value = {
     ...selectedScheduleOptionByInterviewId.value,
     [normalizedInterviewId]: String(nextValue || '').trim(),
@@ -129,7 +137,9 @@ const updateSelectedScheduleOption = (interviewId, nextValue) => {
 
 const openRescheduleForm = (record = {}) => {
   openRescheduleInterviewId.value = String(record?.id || '').trim()
-  requestedScheduleAt.value = toDateTimeLocalValue(record?.requestedScheduleAt || record?.requested_schedule_at || record?.scheduledAt)
+  requestedScheduleAt.value = toDateTimeLocalValue(
+    record?.requestedScheduleAt || record?.requested_schedule_at || record?.scheduledAt || record?.scheduled_at,
+  )
   rescheduleReason.value = String(record?.applicantResponseReason || record?.applicant_response_reason || '').trim()
 }
 
@@ -139,18 +149,14 @@ const closeRescheduleForm = () => {
   rescheduleReason.value = ''
 }
 const notifyInterviewFormMessage = (text, kind = 'warning', title = '') => {
-  emit('notify', {
-    text: String(text || '').trim(),
-    kind: String(kind || 'warning').trim() || 'warning',
-    title: String(title || '').trim(),
-  })
+  emit('notify', { text: String(text || '').trim(), kind: String(kind || 'warning').trim(), title: String(title || '').trim() })
 }
 
 const submitConfirmInterview = (record = {}) => {
   emit('confirm-interview', {
     interviewId: String(record?.id || '').trim(),
-    applicationId: String(record?.applicationId || '').trim(),
-    interviewType: String(record?.interviewType || '').trim(),
+    applicationId: String(record?.applicationId || record?.application_id || '').trim(),
+    interviewType: String(record?.interviewType || record?.interview_type || '').trim(),
     selectedScheduleAt: getSelectedScheduleOption(record),
   })
 }
@@ -169,686 +175,370 @@ const submitRescheduleRequest = (record = {}) => {
   }
 
   const currentScheduledTimestamp = Date.parse(String(record?.scheduledAt || record?.scheduled_at || '').trim())
-
-  if (
-    Number.isFinite(requestedTimestamp)
-    && Number.isFinite(currentScheduledTimestamp)
-    && requestedTimestamp === currentScheduledTimestamp
-  ) {
-    notifyInterviewFormMessage(
-      'Please change the interview date and time before submitting your reschedule request.',
-      'warning',
-      'Schedule unchanged',
-    )
+  if (Number.isFinite(requestedTimestamp) && Number.isFinite(currentScheduledTimestamp) && requestedTimestamp === currentScheduledTimestamp) {
+    notifyInterviewFormMessage('Please change the interview date and time before submitting your reschedule request.', 'warning', 'Schedule unchanged')
     return
   }
 
   emit('request-reschedule', {
     interviewId: String(record?.id || '').trim(),
-    applicationId: String(record?.applicationId || '').trim(),
-    interviewType: String(record?.interviewType || '').trim(),
+    applicationId: String(record?.applicationId || record?.application_id || '').trim(),
+    interviewType: String(record?.interviewType || record?.interview_type || '').trim(),
     reason: trimmedReason,
     requestedScheduleAt: requestedScheduleAt.value,
   })
   closeRescheduleForm()
 }
+
+const minScheduleDateTime = computed(() => {
+  const now = new Date()
+  now.setSeconds(0, 0)
+  const offset = now.getTimezoneOffset()
+  return new Date(now.getTime() - (offset * 60 * 1000)).toISOString().slice(0, 16)
+})
+
+const getCompanyInitials = (value) =>
+  String(value || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map((item) => item.charAt(0).toUpperCase()).join('') || 'IN'
+
+const getInterviewThreadPreview = (record = {}) => {
+  const responseStatus = normalizeInterviewResponseStatus(record)
+  const requestedScheduleLabel = String(record?.requestedScheduleAt || record?.requested_schedule_at || '').trim()
+  const businessNote = String(record?.businessDecisionReason || record?.business_decision_reason || '').trim()
+  const availableOptions = normalizeAvailableScheduleOptions(record)
+  if (isCompletedInterview(record)) return 'This interview is already completed.'
+  if (isCancelledInterview(record)) return getInterviewCancellationMessage(record)
+  if (responseStatus === 'confirmed') return `You confirmed attendance for ${formatInterviewWhen(record?.scheduledAt || record?.scheduled_at)}.`
+  if (responseStatus === 'reschedule_requested') {
+    return requestedScheduleLabel
+      ? `You requested a new schedule for ${formatInterviewWhen(requestedScheduleLabel)}.`
+      : 'You requested a new interview schedule.'
+  }
+  if (responseStatus === 'reschedule_rejected') return businessNote || 'Your reschedule request was not approved.'
+  if (availableOptions.length > 1) return `${availableOptions.length} alternate interview dates were shared by the employer.`
+  if (businessNote) return businessNote
+  return `Scheduled for ${formatInterviewWhen(record?.scheduledAt || record?.scheduled_at)}. Review and confirm your interview.`
+}
+
+const getInterviewFilterId = (record = {}) => {
+  const responseStatus = normalizeInterviewResponseStatus(record)
+  if (isCancelledInterview(record) || responseStatus === 'reschedule_rejected') return 'cancelled'
+  if (isCompletedInterview(record)) return 'completed'
+  if (responseStatus === 'confirmed') return 'confirmed'
+  return 'awaiting'
+}
+
+const normalizedInterviews = computed(() =>
+  (Array.isArray(props.interviews) ? props.interviews : [])
+    .map((interview) => {
+      const companyLabel = String(interview?.workspaceOwnerName || interview?.workspace_owner_name || 'Business Workspace').trim() || 'Business Workspace'
+      const roleLabel = String(interview?.jobTitle || interview?.job_title || 'Applied Role').trim() || 'Applied Role'
+      const scheduledAtValue = String(interview?.scheduledAt || interview?.scheduled_at || '').trim()
+      const activityValue = getInterviewActivityTime(interview)
+      return {
+        ...interview,
+        id: String(interview?.id || '').trim(),
+        companyLabel,
+        roleLabel,
+        typeLabel: formatInterviewType(interview?.interviewType || interview?.interview_type),
+        modeLabel: formatInterviewMode(interview?.mode || interview?.interviewMode || interview?.interview_mode),
+        statusLabel: formatInterviewStatus(interview),
+        statusToneClass: statusClass(interview),
+        scheduledAtLabel: formatInterviewWhen(scheduledAtValue),
+        interviewerLabel: String(interview?.interviewer || '').trim() || 'To be announced',
+        locationLabel: String(interview?.locationOrLink || interview?.location_or_link || '').trim() || 'Will be shared by the business',
+        notesLabel: String(interview?.notes || '').trim() || 'No additional interview instructions yet.',
+        businessNote: String(interview?.businessDecisionReason || interview?.business_decision_reason || '').trim(),
+        requestedScheduleLabel: String(interview?.requestedScheduleAt || interview?.requested_schedule_at || '').trim()
+          ? formatInterviewWhen(interview?.requestedScheduleAt || interview?.requested_schedule_at)
+          : '',
+        preview: getInterviewThreadPreview(interview),
+        filterId: getInterviewFilterId(interview),
+        activityValue,
+        activityLabel: formatInterviewActivityDate(activityValue || scheduledAtValue),
+        avatarInitials: getCompanyInitials(companyLabel),
+        availableScheduleOptions: normalizeAvailableScheduleOptions(interview),
+      }
+    })
+    .filter((interview) => interview.id)
+    .sort((left, right) => (right.activityValue || 0) - (left.activityValue || 0)),
+)
+
+const stats = computed(() => ({
+  total: normalizedInterviews.value.length,
+  awaiting: normalizedInterviews.value.filter((interview) => interview.filterId === 'awaiting').length,
+  confirmed: normalizedInterviews.value.filter((interview) => interview.filterId === 'confirmed').length,
+  closed: normalizedInterviews.value.filter((interview) => ['completed', 'cancelled'].includes(interview.filterId)).length,
+}))
+
+const filters = computed(() => [
+  { id: 'all', label: 'All', count: normalizedInterviews.value.length },
+  { id: 'awaiting', label: 'Awaiting', count: normalizedInterviews.value.filter((item) => item.filterId === 'awaiting').length },
+  { id: 'confirmed', label: 'Confirmed', count: normalizedInterviews.value.filter((item) => item.filterId === 'confirmed').length },
+  { id: 'completed', label: 'Completed', count: normalizedInterviews.value.filter((item) => item.filterId === 'completed').length },
+  { id: 'cancelled', label: 'Closed', count: normalizedInterviews.value.filter((item) => item.filterId === 'cancelled').length },
+])
+
+const filteredInterviews = computed(() => {
+  const query = String(searchQuery.value || '').trim().toLowerCase()
+  return normalizedInterviews.value.filter((interview) => {
+    const matchesFilter = activeFilter.value === 'all' ? true : interview.filterId === activeFilter.value
+    if (!matchesFilter) return false
+    if (!query) return true
+    return [
+      interview.companyLabel,
+      interview.roleLabel,
+      interview.typeLabel,
+      interview.modeLabel,
+      interview.statusLabel,
+      interview.preview,
+      interview.interviewerLabel,
+      interview.locationLabel,
+      interview.notesLabel,
+    ].some((value) => String(value || '').toLowerCase().includes(query))
+  })
+})
+
+const selectedInterview = computed(() =>
+  filteredInterviews.value.find((interview) => interview.id === selectedInterviewId.value) || filteredInterviews.value[0] || null,
+)
+
+watch(filteredInterviews, (items) => {
+  const nextItems = Array.isArray(items) ? items : []
+  if (!nextItems.some((item) => item.id === selectedInterviewId.value)) {
+    selectedInterviewId.value = nextItems[0]?.id || ''
+  }
+}, { immediate: true })
+
+watch(selectedInterviewId, (nextId) => {
+  if (openRescheduleInterviewId.value && openRescheduleInterviewId.value !== String(nextId || '').trim()) {
+    closeRescheduleForm()
+  }
+})
 </script>
 
 <template>
   <section class="applicant-interviews-page">
-    <section class="applicant-interviews-page__grid">
-      <aside class="applicant-interviews-page__rail">
-        <article class="applicant-interviews-page__profile-card applicant-panel">
-          <div class="applicant-interviews-page__profile-head">
-            <span class="applicant-interviews-page__profile-badge">Applicant</span>
-            <span class="applicant-interviews-page__profile-status">Interview Tracker</span>
-          </div>
+  
 
-          <div class="applicant-interviews-page__identity">
-            <p class="applicant-interviews-page__eyebrow">Interviews</p>
-            <h2>Employer Schedules</h2>
-            <p>Review the business that invited you, the role you applied for, and your interview schedule.</p>
-          </div>
+    <div class="applicant-interviews-page__shell">
+      <aside class="applicant-interviews-page__list-pane">
+        <div class="applicant-interviews-page__filters">
+          <button
+            v-for="filter in filters"
+            :key="filter.id"
+            type="button"
+            :class="{ 'is-active': activeFilter === filter.id }"
+            @click="activeFilter = filter.id"
+          >
+            <span>{{ filter.label }}</span>
+            <strong>{{ filter.count }}</strong>
+          </button>
+        </div>
 
-          <div class="applicant-interviews-page__mini-list">
-            <div class="applicant-interviews-page__mini-item">
-              <span><i class="bi bi-calendar-check" aria-hidden="true" /> Total Interviews</span>
-              <strong>{{ interviews.length }}</strong>
-            </div>
-            <div class="applicant-interviews-page__mini-item">
-              <span><i class="bi bi-hourglass-split" aria-hidden="true" /> Scheduled</span>
-              <strong>{{ interviews.filter((entry) => String(entry.scheduleStatus || '').toLowerCase() === 'scheduled').length }}</strong>
-            </div>
-            <div class="applicant-interviews-page__mini-item">
-              <span><i class="bi bi-check2-circle" aria-hidden="true" /> Completed</span>
-              <strong>{{ interviews.filter((entry) => String(entry.scheduleStatus || '').toLowerCase() === 'completed').length }}</strong>
-            </div>
-          </div>
-        </article>
+        <div v-if="filteredInterviews.length" class="applicant-interviews-page__threads">
+          <button
+            v-for="interview in filteredInterviews"
+            :key="interview.id"
+            type="button"
+            class="applicant-interviews-page__thread"
+            :class="{ 'is-active': selectedInterview?.id === interview.id }"
+            @click="selectedInterviewId = interview.id"
+          >
+            <span class="applicant-interviews-page__avatar" aria-hidden="true">{{ interview.avatarInitials }}</span>
+            <span class="applicant-interviews-page__thread-copy">
+              <span class="applicant-interviews-page__thread-top">
+                <strong>{{ interview.companyLabel }}</strong>
+                <small>{{ interview.activityLabel }}</small>
+              </span>
+              <span class="applicant-interviews-page__thread-subject">{{ interview.roleLabel }}</span>
+              <span class="applicant-interviews-page__thread-preview">{{ interview.preview }}</span>
+              <span class="applicant-interviews-page__thread-tags">
+                <span>{{ interview.typeLabel }}</span>
+                <span>{{ interview.statusLabel }}</span>
+              </span>
+            </span>
+          </button>
+        </div>
+
+        <div v-else class="applicant-interviews-page__empty">
+          <i class="bi bi-calendar-x" aria-hidden="true" />
+          <h2>No interview matches</h2>
+          <p>Try another filter or search term. Employer interview updates will appear here automatically.</p>
+        </div>
       </aside>
 
-      <article class="applicant-interviews-page__panel applicant-panel">
-        <div class="applicant-panel__head">
-          <div>
-            <h3>Interview Schedule</h3>
-            <span>Live updates from the business workspace</span>
+      <section class="applicant-interviews-page__viewer">
+        <article v-if="selectedInterview" class="applicant-interviews-page__message">
+          <div class="applicant-interviews-page__badges">
+            <span class="badge">Interview Notice</span>
+            <span class="badge" :class="selectedInterview.statusToneClass">{{ selectedInterview.statusLabel }}</span>
+            <span class="badge muted">{{ selectedInterview.typeLabel }}</span>
           </div>
-        </div>
 
-        <div v-if="interviews.length" class="applicant-interviews-page__list">
-          <article
-            v-for="interview in interviews"
-            :key="interview.id"
-            class="applicant-interviews-page__card"
-            :class="{
-              'applicant-interviews-page__card--inactive': isCancelledInterview(interview),
-              'applicant-interviews-page__card--compact': isCompletedInterview(interview),
-            }"
-          >
-            <div class="applicant-interviews-page__card-top">
+          <header class="applicant-interviews-page__message-head">
+            <h2>{{ selectedInterview.roleLabel }}</h2>
+            <div class="applicant-interviews-page__sender">
+              <span class="applicant-interviews-page__avatar" aria-hidden="true">{{ selectedInterview.avatarInitials }}</span>
               <div>
-                <h4>{{ interview.workspaceOwnerName || 'Business Workspace' }}</h4>
-                <p>{{ interview.jobTitle || 'Applied Role' }}</p>
+                <strong>{{ selectedInterview.companyLabel }}</strong>
+                <span>{{ selectedInterview.typeLabel }} for {{ selectedInterview.roleLabel }}</span>
               </div>
-              <span class="applicant-interviews-page__status applicant-status-pill" :class="statusClass(interview)">
-                {{ formatInterviewStatus(interview) }}
-              </span>
+              <time>{{ selectedInterview.scheduledAtLabel }}</time>
             </div>
+          </header>
 
-            <div class="applicant-interviews-page__meta">
-              <span><i class="bi bi-person-workspace" /> {{ formatInterviewType(interview.interviewType) }}</span>
-              <span><i class="bi bi-display" /> {{ formatInterviewMode(interview.mode) }}</span>
-              <span><i class="bi bi-calendar-event" /> {{ formatInterviewWhen(interview.scheduledAt) }}</span>
-            </div>
+          <div class="applicant-interviews-page__body">
+            <p>{{ selectedInterview.companyLabel }} sent you an interview update for {{ selectedInterview.roleLabel }}.</p>
+            <p>{{ selectedInterview.preview }}</p>
+          </div>
 
-            <div
-              v-if="isCompletedInterview(interview)"
-              class="applicant-interviews-page__response-box applicant-interviews-page__response-box--compact"
-            >
-              <strong>Interview completed</strong>
-              <span>This interview has already been finished. Full scheduling details are hidden to keep the page cleaner.</span>
-            </div>
+          <div class="applicant-interviews-page__grid">
+            <article><span>Schedule</span><strong>{{ selectedInterview.scheduledAtLabel }}</strong></article>
+            <article><span>Mode</span><strong>{{ selectedInterview.modeLabel }}</strong></article>
+            <article><span>Interviewer</span><strong>{{ selectedInterview.interviewerLabel }}</strong></article>
+            <article><span>Location / Link</span><strong>{{ selectedInterview.locationLabel }}</strong></article>
+            <article class="wide"><span>Notes</span><strong>{{ selectedInterview.notesLabel }}</strong></article>
+          </div>
 
-            <div
-              v-else-if="isCancelledInterview(interview)"
-              class="applicant-interviews-page__response-box applicant-interviews-page__response-box--danger"
-            >
-              <strong>Interview Discontinued</strong>
-              <span>{{ getInterviewCancellationMessage(interview) }}</span>
-            </div>
+          <div v-if="isCompletedInterview(selectedInterview)" class="applicant-interviews-page__box success">
+            <strong>Interview completed</strong>
+            <span>The employer marked this interview as completed. Watch your applications and inbox for next steps.</span>
+          </div>
 
-            <div v-if="!isCompletedInterview(interview)" class="applicant-interviews-page__detail-grid">
-              <div class="applicant-interviews-page__detail-item">
-                <span>Interviewer</span>
-                <strong>{{ interview.interviewer || 'To be announced' }}</strong>
-              </div>
-              <div class="applicant-interviews-page__detail-item">
-                <span>Location / Link</span>
-                <strong>{{ interview.locationOrLink || 'Will be shared by the business' }}</strong>
-              </div>
-              <div class="applicant-interviews-page__detail-item applicant-interviews-page__detail-item--wide">
-                <span>Notes</span>
-                <strong>{{ interview.notes || 'No additional interview instructions yet.' }}</strong>
-              </div>
-            </div>
+          <div v-else-if="isCancelledInterview(selectedInterview)" class="applicant-interviews-page__box danger">
+            <strong>Interview closed</strong>
+            <span>{{ getInterviewCancellationMessage(selectedInterview) }}</span>
+          </div>
 
-            <div
-              v-if="!isCompletedInterview(interview) && (interview.requestedScheduleAt || interview.applicantResponseReason || interview.businessDecisionReason)"
-              class="applicant-interviews-page__response-box"
-            >
-              <strong>Interview Response</strong>
-              <span v-if="interview.requestedScheduleAt">Requested schedule: {{ formatInterviewWhen(interview.requestedScheduleAt) }}</span>
-              <span v-if="interview.applicantResponseReason">Reschedule reason: {{ interview.applicantResponseReason }}</span>
-              <span v-if="interview.businessDecisionReason && !isCancelledInterview(interview)">Business note: {{ interview.businessDecisionReason }}</span>
-            </div>
+          <div
+            v-if="!isCompletedInterview(selectedInterview)
+              && (selectedInterview.requestedScheduleLabel || selectedInterview.applicantResponseReason || selectedInterview.businessNote)"
+            class="applicant-interviews-page__box"
+          >
+            <strong>Response history</strong>
+            <span v-if="selectedInterview.requestedScheduleLabel">Requested schedule: {{ selectedInterview.requestedScheduleLabel }}</span>
+            <span v-if="selectedInterview.applicantResponseReason">Reschedule reason: {{ selectedInterview.applicantResponseReason }}</span>
+            <span v-if="selectedInterview.businessNote && !isCancelledInterview(selectedInterview)">Employer note: {{ selectedInterview.businessNote }}</span>
+          </div>
 
-            <div
-              v-if="!isCompletedInterview(interview) && normalizeAvailableScheduleOptions(interview).length"
-              class="applicant-interviews-page__response-box"
-            >
-              <strong>Available Reschedule Dates</strong>
-              <span>Select one of the dates shared by the business owner, then confirm your interview.</span>
-              <label class="applicant-interviews-page__form-field">
-                <span>Available date options</span>
-                <select
-                  :value="getSelectedScheduleOption(interview)"
-                  :disabled="activeActionId === interview.id"
-                  @change="updateSelectedScheduleOption(interview.id, $event.target.value)"
-                >
-                  <option
-                    v-for="scheduleOption in normalizeAvailableScheduleOptions(interview)"
-                    :key="scheduleOption"
-                    :value="scheduleOption"
-                  >
-                    {{ formatInterviewWhen(scheduleOption) }}
-                  </option>
-                </select>
-              </label>
-            </div>
-
-            <div
-              v-if="!isCompletedInterview(interview) && (canConfirmInterview(interview) || canRequestReschedule(interview))"
-              class="applicant-interviews-page__actions"
-            >
-              <button
-                v-if="canConfirmInterview(interview)"
-                type="button"
-                class="applicant-interviews-page__action applicant-interviews-page__action--primary"
-                :disabled="activeActionId === interview.id"
-                @click="submitConfirmInterview(interview)"
+          <div
+            v-if="!isCompletedInterview(selectedInterview) && selectedInterview.availableScheduleOptions.length"
+            class="applicant-interviews-page__box"
+          >
+            <strong>Available date options</strong>
+            <span>Select one of the date options shared by the employer before confirming your interview.</span>
+            <label class="applicant-interviews-page__field">
+              <span>Employer date options</span>
+              <select
+                :value="getSelectedScheduleOption(selectedInterview)"
+                :disabled="activeActionId === selectedInterview.id"
+                @change="updateSelectedScheduleOption(selectedInterview.id, $event.target.value)"
               >
-                {{ activeActionId === interview.id ? 'Saving...' : 'Confirm Interview' }}
-              </button>
-              <button
-                v-if="canRequestReschedule(interview)"
-                type="button"
-                class="applicant-interviews-page__action applicant-interviews-page__action--secondary"
-                :disabled="activeActionId === interview.id"
-                @click="openRescheduleInterviewId === interview.id ? closeRescheduleForm() : openRescheduleForm(interview)"
-              >
-                {{ openRescheduleInterviewId === interview.id ? 'Close Form' : 'Request Reschedule' }}
-              </button>
-            </div>
+                <option
+                  v-for="scheduleOption in selectedInterview.availableScheduleOptions"
+                  :key="scheduleOption"
+                  :value="scheduleOption"
+                >
+                  {{ formatInterviewWhen(scheduleOption) }}
+                </option>
+              </select>
+            </label>
+          </div>
 
-            <form
-              v-if="!isCompletedInterview(interview) && openRescheduleInterviewId === interview.id && canRequestReschedule(interview)"
-              class="applicant-interviews-page__reschedule-form"
-              @submit.prevent="submitRescheduleRequest(interview)"
+          <div
+            v-if="!isCompletedInterview(selectedInterview) && (canConfirmInterview(selectedInterview) || canRequestReschedule(selectedInterview))"
+            class="applicant-interviews-page__actions"
+          >
+            <button
+              v-if="canConfirmInterview(selectedInterview)"
+              type="button"
+              class="primary"
+              :disabled="activeActionId === selectedInterview.id"
+              @click="submitConfirmInterview(selectedInterview)"
             >
-              <label class="applicant-interviews-page__form-field">
-                <span>Preferred new date &amp; time</span>
-                <input
-                  v-model="requestedScheduleAt"
-                  type="datetime-local"
-                  :min="minScheduleDateTime"
-                  required
-                />
-              </label>
-              <label class="applicant-interviews-page__form-field applicant-interviews-page__form-field--wide">
-                <span>Reason for rescheduling</span>
-                <textarea
-                  v-model.trim="rescheduleReason"
-                  rows="3"
-                  placeholder="Explain why you need another interview time."
-                  required
-                />
-              </label>
-              <div class="applicant-interviews-page__form-actions">
-                <button
-                  type="submit"
-                  class="applicant-interviews-page__action applicant-interviews-page__action--primary"
-                  :disabled="activeActionId === interview.id"
-                >
-                  {{ activeActionId === interview.id ? 'Sending...' : 'Send Request' }}
-                </button>
-                <button
-                  type="button"
-                  class="applicant-interviews-page__action applicant-interviews-page__action--secondary"
-                  :disabled="activeActionId === interview.id"
-                  @click="closeRescheduleForm()"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </article>
-        </div>
+              {{ activeActionId === selectedInterview.id ? 'Saving...' : 'Confirm Attendance' }}
+            </button>
+            <button
+              v-if="canRequestReschedule(selectedInterview)"
+              type="button"
+              :disabled="activeActionId === selectedInterview.id"
+              @click="openRescheduleInterviewId === selectedInterview.id ? closeRescheduleForm() : openRescheduleForm(selectedInterview)"
+            >
+              {{ openRescheduleInterviewId === selectedInterview.id ? 'Close Form' : 'Request Another Time' }}
+            </button>
+          </div>
 
-        <div v-else class="applicant-interviews-page__empty applicant-dashboard-empty">
-          <i class="bi bi-calendar-x" aria-hidden="true" />
-          <h3>No interview schedules yet</h3>
-          <p>When a business schedules your interview in Firestore, it will appear here.</p>
+          <form
+            v-if="!isCompletedInterview(selectedInterview)
+              && openRescheduleInterviewId === selectedInterview.id
+              && canRequestReschedule(selectedInterview)"
+            class="applicant-interviews-page__form"
+            @submit.prevent="submitRescheduleRequest(selectedInterview)"
+          >
+            <label class="applicant-interviews-page__field">
+              <span>Preferred new date &amp; time</span>
+              <input v-model="requestedScheduleAt" type="datetime-local" :min="minScheduleDateTime" required />
+            </label>
+            <label class="applicant-interviews-page__field">
+              <span>Reason for rescheduling</span>
+              <textarea v-model.trim="rescheduleReason" rows="4" placeholder="Explain why you need another interview time." required />
+            </label>
+            <div class="applicant-interviews-page__actions">
+              <button type="submit" class="primary" :disabled="activeActionId === selectedInterview.id">
+                {{ activeActionId === selectedInterview.id ? 'Sending...' : 'Send Request' }}
+              </button>
+              <button type="button" :disabled="activeActionId === selectedInterview.id" @click="closeRescheduleForm()">Cancel</button>
+            </div>
+          </form>
+        </article>
+
+        <div v-else class="applicant-interviews-page__empty">
+          <i class="bi bi-envelope-open" aria-hidden="true" />
+          <h2>Select an interview</h2>
+          <p>Choose an interview thread from the left side to review its schedule and employer notes.</p>
         </div>
-      </article>
-    </section>
+      </section>
+    </div>
   </section>
 </template>
 
 <style scoped src="@/components/applicant_dashboard.css"></style>
 
 <style scoped>
-.applicant-interviews-page {
-  display: grid;
-  gap: 1.05rem;
-  padding: 0 1.25rem;
-  justify-items: start;
-  width: 100%;
-}
-
-.applicant-interviews-page__grid {
-  display: grid;
-  grid-template-columns: 18rem minmax(0, 1fr);
-  gap: 1.5rem;
-  align-items: start;
-  width: 100%;
-  max-width: none;
-}
-
-.applicant-interviews-page__rail {
-  display: grid;
-  gap: 1rem;
-}
-
-.applicant-interviews-page__profile-card,
-.applicant-interviews-page__panel {
-  display: grid;
-  gap: 1.05rem;
-  border: 1px solid rgba(112, 168, 136, 0.16);
-  border-radius: 0.72rem;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 251, 247, 0.94) 100%);
-  box-shadow:
-    0 16px 36px rgba(79, 129, 102, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.92);
-  padding: 1.15rem 1.2rem;
-}
-
-.applicant-interviews-page__profile-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.applicant-interviews-page__profile-badge,
-.applicant-interviews-page__profile-status {
-  border: 1px solid rgba(205, 216, 226, 0.92);
-  border-radius: 0.45rem;
-  padding: 0.26rem 0.62rem;
-  font-size: 0.68rem;
-  font-weight: 700;
-  line-height: 1.2;
-}
-
-.applicant-interviews-page__profile-badge {
-  color: #4a5b54;
-  background: #f8faf8;
-}
-
-.applicant-interviews-page__profile-status {
-  color: #1d6b3a;
-  background: #f1f9f4;
-}
-
-.applicant-interviews-page__identity,
-.applicant-interviews-page__identity h2,
-.applicant-interviews-page__identity p,
-.applicant-interviews-page__eyebrow,
-.applicant-interviews-page__card h4,
-.applicant-interviews-page__card p {
-  margin: 0;
-}
-
-.applicant-interviews-page__eyebrow {
-  color: #7b8a83;
-  font-size: 0.66rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.applicant-interviews-page__identity h2 {
-  margin-top: 0.2rem;
-  color: #20312a;
-  font-size: 1.15rem;
-}
-
-.applicant-interviews-page__identity p {
-  margin-top: 0.28rem;
-  color: #63756d;
-  font-size: 0.78rem;
-  line-height: 1.55;
-}
-
-.applicant-interviews-page__mini-list {
-  display: grid;
-  gap: 0.75rem;
-  border-top: 1px solid rgba(229, 233, 230, 0.95);
-  padding-top: 0.75rem;
-}
-
-.applicant-interviews-page__mini-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.75rem;
-  align-items: start;
-  padding: 0.8rem 0.9rem;
-  border: 1px solid rgba(205, 216, 226, 0.92);
-  border-radius: 0.62rem;
-  background: #ffffff;
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
-}
-
-.applicant-interviews-page__mini-item:last-child {
-  border-bottom: 1px solid rgba(205, 216, 226, 0.92);
-}
-
-.applicant-interviews-page__mini-item span {
-  color: #707f78;
-  font-size: 0.72rem;
-  font-weight: 600;
-}
-
-.applicant-interviews-page__mini-item span i {
-  margin-right: 0.35rem;
-}
-
-.applicant-interviews-page__mini-item strong {
-  color: #24342d;
-  font-size: 0.74rem;
-  font-weight: 700;
-  text-align: right;
-}
-
-.applicant-interviews-page__list {
-  display: grid;
-  gap: 1.05rem;
-}
-
-.applicant-interviews-page__card {
-  display: grid;
-  gap: 1rem;
-  padding: 1.1rem;
-  border: 1px solid rgba(205, 216, 226, 0.92);
-  border-radius: 0.72rem;
-  background: #ffffff;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
-}
-
-.applicant-interviews-page__card--inactive {
-  border-color: rgba(208, 215, 211, 0.95);
-  background: linear-gradient(180deg, #fbfcfb 0%, #f4f7f5 100%);
-  box-shadow: none;
-}
-
-.applicant-interviews-page__card--compact {
-  gap: 0.75rem;
-  padding: 0.95rem 1rem;
-}
-
-.applicant-interviews-page__card-top {
-  display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.applicant-interviews-page__card h4 {
-  color: #20312a;
-  font-size: 1rem;
-  font-weight: 800;
-}
-
-.applicant-interviews-page__card p {
-  margin-top: 0.28rem;
-  color: #63756d;
-  font-size: 0.8rem;
-}
-
-.applicant-interviews-page__status {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 2.1rem;
-  padding: 0.38rem 0.82rem;
-  border: 1px solid rgba(201, 211, 205, 0.95);
-  background: #ffffff;
-  color: #1d6b3a;
-  font-size: 0.72rem;
-  font-weight: 700;
-}
-
-.applicant-interviews-page__status.is-info {
-  background: #eff6ff;
-  border-color: rgba(191, 219, 254, 0.95);
-  color: #1d4ed8;
-}
-
-.applicant-interviews-page__status.is-success {
-  background: #ecfdf3;
-  border-color: rgba(167, 243, 208, 0.95);
-  color: #047857;
-}
-
-.applicant-interviews-page__status.is-warning {
-  background: #fff7ed;
-  border-color: rgba(253, 230, 138, 0.95);
-  color: #b45309;
-}
-
-.applicant-interviews-page__status.is-danger {
-  background: #fef2f2;
-  border-color: rgba(254, 205, 211, 0.95);
-  color: #b91c1c;
-}
-
-.applicant-interviews-page__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.applicant-interviews-page__meta span {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-height: 1.5rem;
-  padding: 0.22rem 0.5rem;
-  border: 1px solid rgba(205, 216, 226, 0.92);
-  border-radius: 0.4rem;
-  background: #f8fbf9;
-  color: #355646;
-  font-size: 0.68rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.applicant-interviews-page__meta span i {
-  font-size: 0.72rem;
-}
-
-.applicant-interviews-page__detail-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.9rem;
-}
-
-.applicant-interviews-page__detail-item {
-  display: grid;
-  gap: 0.35rem;
-  padding: 0.9rem;
-  border: 1px solid rgba(205, 216, 226, 0.92);
-  border-radius: 0.62rem;
-  background: #fbfcfa;
-}
-
-.applicant-interviews-page__detail-item--wide {
-  grid-column: 1 / -1;
-}
-
-.applicant-interviews-page__detail-item span {
-  color: #7b8781;
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.applicant-interviews-page__detail-item strong {
-  color: #24342d;
-  font-size: 0.84rem;
-  line-height: 1.55;
-}
-
-.applicant-interviews-page__response-box,
-.applicant-interviews-page__reschedule-form {
-  display: grid;
-  gap: 0.7rem;
-  padding: 0.9rem;
-  border: 1px solid rgba(205, 216, 226, 0.92);
-  border-radius: 0.62rem;
-  background: #fbfcfa;
-}
-
-.applicant-interviews-page__response-box strong {
-  color: #20312a;
-  font-size: 0.84rem;
-}
-
-.applicant-interviews-page__response-box span {
-  color: #63756d;
-  font-size: 0.78rem;
-  line-height: 1.55;
-}
-
-.applicant-interviews-page__response-box--danger {
-  border-color: rgba(248, 113, 113, 0.28);
-  background: rgba(254, 242, 242, 0.92);
-}
-
-.applicant-interviews-page__response-box--danger strong,
-.applicant-interviews-page__response-box--danger span {
-  color: #991b1b;
-}
-
-.applicant-interviews-page__response-box--compact {
-  gap: 0.35rem;
-  padding: 0.75rem 0.85rem;
-  background: rgba(236, 253, 243, 0.75);
-  border-color: rgba(134, 239, 172, 0.45);
-}
-
-.applicant-interviews-page__actions,
-.applicant-interviews-page__form-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-.applicant-interviews-page__action {
-  min-height: 2.8rem;
-  padding: 0.72rem 1rem;
-  border: 1px solid rgba(205, 216, 226, 0.92);
-  border-radius: 0.58rem;
-  background: #ffffff;
-  color: #24342d;
-  font: inherit;
-  font-size: 0.78rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
-}
-
-.applicant-interviews-page__action--primary {
-  background: linear-gradient(135deg, #2f6a49 0%, #4f8c67 100%);
-  border-color: transparent;
-  color: #ffffff;
-  box-shadow: 0 12px 24px rgba(47, 106, 73, 0.18);
-}
-
-.applicant-interviews-page__action--secondary {
-  background: #ffffff;
-}
-
-.applicant-interviews-page__action:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.applicant-interviews-page__action--primary:hover:not(:disabled) {
-  box-shadow: 0 16px 28px rgba(47, 106, 73, 0.2);
-}
-
-.applicant-interviews-page__action:disabled {
-  opacity: 0.65;
-  cursor: not-allowed;
-}
-
-.applicant-interviews-page__form-field {
-  display: grid;
-  gap: 0.35rem;
-}
-
-.applicant-interviews-page__form-field span {
-  color: #64756d;
-  font-size: 0.74rem;
-  font-weight: 700;
-}
-
-.applicant-interviews-page__form-field input,
-.applicant-interviews-page__form-field textarea,
-.applicant-interviews-page__form-field select {
-  width: 100%;
-  border: 1px solid rgba(205, 216, 226, 0.92);
-  border-radius: 0.58rem;
-  background: #ffffff;
-  color: #24342d;
-  font: inherit;
-  padding: 0.7rem 0.85rem;
-}
-
-.applicant-interviews-page__form-field textarea {
-  resize: vertical;
-}
-
-.applicant-interviews-page__panel {
-  grid-template-rows: auto minmax(0, 1fr);
-  width: 100%;
-  min-height: calc(100vh - 10.5rem);
-}
-
-.applicant-interviews-page__empty {
-  min-height: 100%;
-  display: grid;
-  place-items: center;
-  align-content: center;
-  gap: 0.55rem;
-  text-align: center;
-  color: #62706a;
-}
-
-.applicant-interviews-page__empty i {
-  font-size: 1.6rem;
-  color: #1b8a54;
-}
-
-.applicant-interviews-page__empty h3,
-.applicant-interviews-page__empty p {
-  margin: 0;
-}
-
-@media (max-width: 1080px) {
-  .applicant-interviews-page__grid,
-  .applicant-interviews-page__detail-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .applicant-interviews-page__panel {
-    min-height: 24rem;
-  }
-}
-
-@media (max-width: 720px) {
-  .applicant-interviews-page {
-    padding: 0 0.85rem;
-  }
-
-  .applicant-interviews-page__card-top {
-    grid-template-columns: 1fr;
-    display: grid;
-  }
-
-  .applicant-interviews-page__card {
-    padding: 1rem;
-  }
-
-  .applicant-interviews-page__meta span,
-  .applicant-interviews-page__action {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .applicant-interviews-page__actions,
-  .applicant-interviews-page__form-actions {
-    flex-direction: column;
-  }
-}
+.applicant-interviews-page{display:grid;gap:1.25rem;padding:0 1.25rem;width:100%;min-height:min(46rem,calc(100vh - 8.75rem))}
+.applicant-interviews-page__hero,.applicant-interviews-page__list-pane,.applicant-interviews-page__viewer{border:1px solid rgba(66,112,87,.18);background:rgba(255,255,255,.97);box-shadow:0 18px 36px rgba(31,74,51,.07)}
+.applicant-interviews-page__hero{display:flex;justify-content:space-between;gap:1.25rem;padding:1.4rem 1.5rem;background:radial-gradient(circle at top left,rgba(214,241,227,.85),transparent 42%),linear-gradient(135deg,rgba(255,255,255,.98),rgba(246,252,249,.98))}
+.applicant-interviews-page__eyebrow,.applicant-interviews-page__intro,.applicant-interviews-page__hero h1{margin:0}
+.applicant-interviews-page__eyebrow{font-size:.74rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#577564}
+.applicant-interviews-page__hero h1{color:#183927;font-size:clamp(1.8rem,2vw,2.2rem);line-height:1.05}
+.applicant-interviews-page__intro{color:#557061;font-size:.97rem;line-height:1.65;max-width:38rem}
+.applicant-interviews-page__hero-side{display:grid;gap:.85rem;min-width:min(100%,22rem)}
+.applicant-interviews-page__search{display:flex;align-items:center;gap:.7rem;padding:.95rem 1rem;border:1px solid rgba(83,128,98,.24);background:rgba(255,255,255,.92)}
+.applicant-interviews-page__search i{color:#45765a}.applicant-interviews-page__search input{width:100%;border:0;outline:0;background:transparent;color:#234532;font:inherit}
+.applicant-interviews-page__stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.7rem}
+.applicant-interviews-page__stats article,.applicant-interviews-page__grid article,.applicant-interviews-page__box,.applicant-interviews-page__form{border:1px solid rgba(83,128,98,.16);background:rgba(248,252,249,.96)}
+.applicant-interviews-page__stats article{display:grid;gap:.24rem;padding:.8rem .9rem}.applicant-interviews-page__stats span,.applicant-interviews-page__grid span,.applicant-interviews-page__field span{color:#6e887a;font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}.applicant-interviews-page__stats strong{color:#173a28;font-size:1.24rem;line-height:1}
+.applicant-interviews-page__shell{display:grid;grid-template-columns:minmax(19rem,26rem) minmax(0,1fr);gap:1.2rem;min-height:0}.applicant-interviews-page__list-pane{display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden}
+.applicant-interviews-page__filters{display:flex;flex-wrap:wrap;gap:.65rem;padding:1rem;border-bottom:1px solid rgba(83,128,98,.14);background:linear-gradient(180deg,rgba(247,252,249,.95),rgba(255,255,255,.95))}
+.applicant-interviews-page__filters button,.applicant-interviews-page__actions button{display:inline-flex;align-items:center;gap:.55rem;padding:.62rem .8rem;border:1px solid rgba(83,128,98,.18);background:#fff;color:#355745;font:inherit;font-weight:700;cursor:pointer;transition:border-color .18s ease,background-color .18s ease,color .18s ease,transform .18s ease}
+.applicant-interviews-page__filters button.is-active{border-color:rgba(31,122,82,.4);background:rgba(224,243,232,.94);color:#18412c}
+.applicant-interviews-page__filters button:hover{transform:translateY(-1px)}
+.applicant-interviews-page__threads{display:grid;grid-auto-rows:max-content;align-content:start;gap:0;overflow-y:auto}.applicant-interviews-page__thread{display:grid;grid-template-columns:auto minmax(0,1fr);gap:.85rem;align-items:flex-start;align-content:start;padding:1rem;border:0;border-bottom:1px solid rgba(83,128,98,.12);background:transparent;text-align:left;cursor:pointer;transition:background-color .18s ease,box-shadow .18s ease}.applicant-interviews-page__thread:hover{background:rgba(242,248,245,.92)}.applicant-interviews-page__thread.is-active{background:linear-gradient(90deg,rgba(216,242,226,.92),rgba(255,255,255,.98));box-shadow:inset 4px 0 0 #2d9360}
+.applicant-interviews-page__avatar{display:inline-grid;place-items:center;width:2.75rem;aspect-ratio:1;border:1px solid rgba(83,128,98,.18);background:linear-gradient(135deg,rgba(225,243,233,.95),rgba(247,252,249,.96));color:#1c5138;font-size:.86rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
+.applicant-interviews-page__thread-copy,.applicant-interviews-page__body,.applicant-interviews-page__sender>div,.applicant-interviews-page__field{display:grid;align-content:start;gap:.35rem;min-width:0}.applicant-interviews-page__thread-top{display:flex;justify-content:space-between;align-items:flex-start;gap:.75rem}
+.applicant-interviews-page__thread-top strong,.applicant-interviews-page__thread-subject,.applicant-interviews-page__body p,.applicant-interviews-page__grid strong,.applicant-interviews-page__box span,.applicant-interviews-page__box strong,.applicant-interviews-page__sender span,.applicant-interviews-page__sender time{overflow-wrap:anywhere}
+.applicant-interviews-page__thread-top strong,.applicant-interviews-page__sender strong{color:#193826;font-size:.95rem}.applicant-interviews-page__thread-top small,.applicant-interviews-page__sender span,.applicant-interviews-page__sender time{color:#6f8a7b;font-size:.8rem}.applicant-interviews-page__thread-top small{white-space:nowrap}
+.applicant-interviews-page__thread-subject{color:#264937;font-size:.92rem;font-weight:700}.applicant-interviews-page__thread-preview{display:-webkit-box;color:#6b8577;font-size:.84rem;line-height:1.5;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.applicant-interviews-page__thread-tags,.applicant-interviews-page__badges,.applicant-interviews-page__actions{display:flex;flex-wrap:wrap;gap:.5rem}.applicant-interviews-page__thread-tags{gap:.55rem;align-items:center;color:#62806e;font-size:.78rem}.applicant-interviews-page__thread-tags span,.badge{display:inline-flex;align-items:center;gap:.4rem;padding:.24rem .5rem;border:1px solid rgba(83,128,98,.16);background:rgba(244,250,246,.92);color:#2a5c42;font-size:.76rem;font-weight:700}
+.badge.is-info{background:rgba(225,239,248,.95);color:#285f86}.badge.is-success{background:rgba(221,245,231,.95);color:#176742}.badge.is-warning{background:rgba(255,245,219,.96);color:#996d00}.badge.is-danger{background:rgba(252,232,232,.94);color:#a03636}.badge.muted{background:rgba(237,240,240,.96);color:#536665}
+.applicant-interviews-page__viewer{display:flex;min-height:0;overflow:hidden}.applicant-interviews-page__message,.applicant-interviews-page__empty{width:100%}.applicant-interviews-page__message{display:grid;gap:1.2rem;padding:1.45rem 1.55rem 1.65rem;overflow-y:auto;background:linear-gradient(180deg,rgba(249,253,251,.98),rgba(255,255,255,.98) 22%)}
+.applicant-interviews-page__message-head{display:grid;gap:1rem;padding-bottom:1.1rem;border-bottom:1px solid rgba(83,128,98,.16)}.applicant-interviews-page__message-head h2,.applicant-interviews-page__empty h2,.applicant-interviews-page__empty p{margin:0}.applicant-interviews-page__message-head h2{color:#173a28;font-size:clamp(1.35rem,1.8vw,1.8rem);line-height:1.2}
+.applicant-interviews-page__sender{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:.9rem;align-items:flex-start}.applicant-interviews-page__body{display:grid;gap:.55rem}.applicant-interviews-page__body p{margin:0;color:#4c6558;font-size:.96rem;line-height:1.72}.applicant-interviews-page__body p:first-child{color:#274737;font-size:1rem}
+.applicant-interviews-page__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.05rem 1.3rem;padding:1.15rem 0;border-top:1px solid rgba(83,128,98,.14);border-bottom:1px solid rgba(83,128,98,.14)}.applicant-interviews-page__grid article{display:grid;gap:.34rem;min-height:3.55rem;padding:0 0 0 1rem;border:0;border-left:2px solid rgba(83,128,98,.18);background:transparent}.applicant-interviews-page__grid article.wide{grid-column:1 / -1}.applicant-interviews-page__grid strong{color:#183927;font-size:.96rem;line-height:1.6}
+.applicant-interviews-page__box,.applicant-interviews-page__form{display:grid;gap:.72rem;padding:1rem 0 0 1rem;border:0;border-top:1px solid rgba(83,128,98,.14);background:transparent}.applicant-interviews-page__box{border-left:2px solid rgba(83,128,98,.18)}.applicant-interviews-page__box strong{color:#20312a;font-size:.9rem}.applicant-interviews-page__box span{color:#63756d;font-size:.84rem;line-height:1.62}.applicant-interviews-page__box.danger{border-left-color:rgba(239,68,68,.42);background:transparent}.applicant-interviews-page__box.danger strong,.applicant-interviews-page__box.danger span{color:#991b1b}.applicant-interviews-page__box.success{border-left-color:rgba(34,197,94,.4);background:transparent}.applicant-interviews-page__box.success strong,.applicant-interviews-page__box.success span{color:#166534}
+.applicant-interviews-page__field input,.applicant-interviews-page__field textarea,.applicant-interviews-page__field select{width:100%;border:1px solid rgba(205,216,226,.92);background:#fff;color:#24342d;font:inherit;padding:.78rem .85rem}.applicant-interviews-page__field textarea{resize:vertical}
+.applicant-interviews-page__actions button.primary{background:#2f6a49;border-color:#2f6a49;color:#fff}.applicant-interviews-page__actions button:disabled{opacity:.65;cursor:not-allowed}
+.applicant-interviews-page__empty{display:grid;place-items:center;align-content:center;gap:.8rem;padding:2rem;text-align:center;color:#5f7a6b}.applicant-interviews-page__empty i{font-size:2rem;color:#4a7b5f}
+@media (max-width:1180px){.applicant-interviews-page{min-height:auto}.applicant-interviews-page__hero{flex-direction:column}.applicant-interviews-page__hero-side{width:100%;min-width:0}.applicant-interviews-page__shell{grid-template-columns:1fr}.applicant-interviews-page__list-pane{max-height:28rem}.applicant-interviews-page__viewer{min-height:30rem}}
+@media (max-width:720px){.applicant-interviews-page{padding:0 .85rem}.applicant-interviews-page__hero,.applicant-interviews-page__message{padding-inline:1rem}.applicant-interviews-page__stats{grid-template-columns:repeat(2,minmax(0,1fr))}.applicant-interviews-page__sender,.applicant-interviews-page__grid{grid-template-columns:1fr}.applicant-interviews-page__grid article.wide{grid-column:auto}.applicant-interviews-page__actions{flex-direction:column}.applicant-interviews-page__actions button{width:100%;justify-content:center}}
 </style>

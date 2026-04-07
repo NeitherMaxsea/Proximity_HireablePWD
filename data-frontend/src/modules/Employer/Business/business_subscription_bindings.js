@@ -1,0 +1,58 @@
+import { computed } from 'vue'
+
+export const createSubscriptionBindings = (ctx) => computed(() => ({
+  activeSubscriptionOverview: ctx.activeSubscriptionOverview.value,
+  openPaymentHistory: ctx.openPaymentHistory,
+  subscriptionPlans: ctx.subscriptionPlans.value,
+  handleSubscriptionPlanClick: ctx.handleSubscriptionPlanClick,
+}))
+
+export const createPaymentBindings = (ctx) => computed(() => ({
+  currentCheckoutFlow: ctx.currentCheckoutFlow.value,
+  isAdvancingPaymentStep: ctx.isAdvancingPaymentStep.value,
+  paymentLoadingMessage: ctx.paymentLoadingMessage.value,
+  paymentStepRows: ctx.paymentStepRows.value,
+  paymentStep: ctx.paymentStep.value,
+  paymentForm: ctx.paymentForm.value,
+  handlePaymentFullNameInput: ctx.handlePaymentFullNameInput,
+  isPaymentContactCountryDropdownOpen: ctx.isPaymentContactCountryDropdownOpen.value,
+  setPaymentContactCountryDropdownElement: ctx.setPaymentContactCountryDropdownElement,
+  togglePaymentContactCountryDropdown: ctx.togglePaymentContactCountryDropdown,
+  getCountryFlagClass: ctx.getCountryFlagClass,
+  paymentContactCountryCode: ctx.paymentContactCountryCode.value,
+  selectedPaymentPhoneCountry: ctx.selectedPaymentPhoneCountry.value,
+  PHONE_COUNTRIES: ctx.PHONE_COUNTRIES,
+  selectPaymentContactCountryOption: ctx.selectPaymentContactCountryOption,
+  formatContactNumberDisplay: ctx.formatContactNumberDisplay,
+  getPaymentLocalContactDigits: ctx.getPaymentLocalContactDigits,
+  handlePaymentContactNumberChange: ctx.handlePaymentContactNumberChange,
+  openCancelPaymentModal: ctx.openCancelPaymentModal,
+  validatePaymentStepOne: ctx.validatePaymentStepOne,
+  goToPaymentStepWithLoading: ctx.goToPaymentStepWithLoading,
+  paymentMethodOptions: ctx.paymentMethodOptions.value,
+  selectedPaymentMethod: ctx.selectedPaymentMethod.value,
+  selectPaymentMethod: (value) => { ctx.selectedPaymentMethod.value = value },
+  goToPaymentStep: ctx.goToPaymentStep,
+  goToPaymentConfirmationStep: ctx.goToPaymentConfirmationStep,
+  isProcessingTestModePayment: ctx.isProcessingTestModePayment.value,
+  isFreeTrialCheckout: ctx.isFreeTrialCheckout.value,
+  isAwaitingExternalPayment: ctx.isAwaitingExternalPayment.value,
+  openMockPaymentTab: ctx.openMockPaymentTab,
+  markPaymentConfirmed: ctx.markPaymentConfirmed,
+  paymentSuccessRedirectSeconds: ctx.paymentSuccessRedirectSeconds.value,
+  orderReceiptCode: ctx.orderReceiptCode.value,
+  orderReceiptDate: ctx.orderReceiptDate,
+  goBackToPlans: ctx.goBackToPlans,
+}))
+
+export const createPaymentHistoryBindings = (ctx) => computed(() => ({
+  goBackToPlans: ctx.goBackToPlans,
+  paymentHistoryFilters: ctx.paymentHistoryFilters,
+  paymentHistoryStatusOptions: ctx.paymentHistoryStatusOptions.value,
+  filteredBusinessPaymentHistoryEntries: ctx.filteredBusinessPaymentHistoryEntries.value,
+  paymentHistoryInitialsFromName: ctx.paymentHistoryInitialsFromName,
+  businessName: ctx.businessName.value,
+  businessEmail: ctx.businessEmail.value,
+  normalizePaymentHistoryStatusClass: ctx.normalizePaymentHistoryStatusClass,
+  openReceiptPreview: ctx.openReceiptPreview,
+}))

@@ -1,12 +1,12 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import Tesseract from 'tesseract.js'
-import FaceVerify from '@/authenticator/Face_Recognition/Face_Verify.vue'
 import mathLogo from '@/assets/math.png'
 import { sendRegistrationOtp } from '@/lib/email_otp'
 import { saveEmployerPendingRegistrationDraft } from '@/lib/employer_registration_draft'
 import 'flag-icons/css/flag-icons.min.css'
+
+const FaceVerify = defineAsyncComponent(() => import('@/authenticator/Face_Recognition/Face_Verify.vue'))
 
 const APPLICANT_REGISTRATION_DRAFT_KEY = 'applicantRegistrationDraft'
 const APPLICANT_REGISTRATION_DRAFT_FILE_DB = 'applicantRegistrationDraftFiles'
@@ -129,6 +129,16 @@ const applicantPwdIdOcrMessage = ref('')
 const applicantPwdIdOcrExtractedNumber = ref('')
 const lastPwdIdOcrToastKey = ref('')
 const isClientVerificationComplete = ref(false)
+let tesseractModulePromise = null
+
+const loadTesseract = async () => {
+  if (!tesseractModulePromise) {
+    tesseractModulePromise = import('tesseract.js')
+  }
+
+  const module = await tesseractModulePromise
+  return module?.default || module
+}
 const isDisabilityDropdownOpen = ref(false)
 const isDisabilityDropdownClosing = ref(false)
 const disabilityDropdownRef = ref(null)
@@ -1581,6 +1591,7 @@ const runPwdIdOcrForSide = async (side, file) => {
   const objectUrl = URL.createObjectURL(file)
 
   try {
+    const Tesseract = await loadTesseract()
     const result = await Tesseract.recognize(objectUrl, 'eng', {
       logger: () => {},
     })

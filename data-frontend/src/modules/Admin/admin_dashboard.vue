@@ -14,6 +14,7 @@ import AdminCreateUser from '@/modules/Admin/admin-create-user.vue'
 import AdminApplicantList from '@/modules/Admin/admin-applicantlist.vue'
 import AdminDeletionHistory from '@/modules/Admin/admin-deletion-history.vue'
 import AdminEmployeeList from '@/modules/Admin/admin-employeelist.vue'
+import AdminJobPostList from '@/modules/Admin/admin-job-post-list.vue'
 import AdminNavbar from '@/modules/Admin/adminnavbar.vue'
 import AdminPreviewPlan from '@/modules/Admin/admin-preview-plan.vue'
 import AdminRoleBasedControlSytem from '@/modules/Admin/admin-rolebasedcontrolsytem.vue'
@@ -33,7 +34,7 @@ import {
   migrateBusinessPaymentHistoryEntries,
   subscribeToAllBusinessPaymentHistory,
 } from '@/lib/business_payment_history'
-import { getPublicJobs, subscribeToPublicJobs } from '@/lib/jobs'
+import { getAllJobs, getPublicJobs, subscribeToAllJobs, subscribeToPublicJobs } from '@/lib/jobs'
 import { auth, db } from '@/firebase'
 
 const router = useRouter()
@@ -54,6 +55,11 @@ const paymentManagementItems = [
   { key: 'create-plan', label: 'Create Plan', icon: 'bi bi-plus-square' },
   { key: 'preview-plan', label: 'Preview Plan', icon: 'bi bi-card-checklist' },
   { key: 'payment-history', label: 'Payment History', icon: 'bi bi-credit-card-2-front' },
+]
+
+const jobManagementItems = [
+  { key: 'all-job-post', label: 'All Job Post', icon: 'bi bi-card-list' },
+  { key: 'test-job-post', label: 'Test Job Post', icon: 'bi bi-bezier2' },
 ]
 
 const storageManagementItems = [
@@ -98,6 +104,7 @@ const settingsModalOpen = ref(false)
 const settingsActivePanel = ref('preferences')
 const userManagementOpen = ref(false)
 const paymentManagementOpen = ref(false)
+const jobManagementOpen = ref(false)
 const storageManagementOpen = ref(false)
 const activeAdminView = ref('dashboard')
 const recentApprovedSearch = ref('')
@@ -119,6 +126,7 @@ const businessWorkspaceUsers = ref({})
 const adminNotifications = ref([])
 const adminToast = ref(null)
 const publicJobs = ref([])
+const adminJobPosts = ref([])
 const adminPaymentHistory = ref([])
 const adminPlanCatalog = ref([])
 const isInitialAdminLoading = ref(true)
@@ -133,12 +141,14 @@ let stopDeletedHistory = () => {}
 let stopActivityLogs = () => {}
 let stopAdminPlanCatalog = () => {}
 let stopPublicJobs = () => {}
+let stopAllJobs = () => {}
 let stopBusinessPaymentHistory = () => {}
 let notificationToastTimer = 0
 let seenApplicantIds = new Set()
 let hasHydratedAdminNotificationState = false
 let shouldSeedSeenApplicantIdsOnFirstSnapshot = true
 let adminSessionStartedAt = Date.now()
+let usePublicJobFallbackForAdminViews = false
 const workspaceUserDirectoryStops = new Map()
 
 const isAnyAdminLoading = computed(() => isInitialAdminLoading.value)
@@ -843,6 +853,8 @@ const currentViewTitle = computed(() => {
   if (activeAdminView.value === 'create-plan') return 'Create Plan'
   if (activeAdminView.value === 'preview-plan') return 'Preview Plan'
   if (activeAdminView.value === 'payment-history') return 'Payment History'
+  if (activeAdminView.value === 'all-job-post') return 'All Job Post'
+  if (activeAdminView.value === 'test-job-post') return 'Test Job Post'
   if (activeAdminView.value === 'business-storage') return 'Business Storage'
   return 'Dashboard'
 })
@@ -854,6 +866,8 @@ const currentViewParent = computed(() =>
     ? 'User Management'
     : ['create-plan', 'preview-plan', 'payment-history'].includes(activeAdminView.value)
       ? 'Subscription Management'
+      : ['all-job-post', 'test-job-post'].includes(activeAdminView.value)
+        ? 'Job Management'
       : ['business-storage'].includes(activeAdminView.value)
         ? 'Storage Management'
       : 'Dashboard',
@@ -870,6 +884,8 @@ const currentViewSubtitle = computed(() => {
   if (activeAdminView.value === 'create-plan') return 'Build a subscription plan with live preview'
   if (activeAdminView.value === 'preview-plan') return 'Review all saved subscription cards'
   if (activeAdminView.value === 'payment-history') return 'Subscription payment history tools will appear here'
+  if (activeAdminView.value === 'all-job-post') return 'Monitor all job posts created across business workspaces'
+  if (activeAdminView.value === 'test-job-post') return 'Review test, sample, demo, and mock job posts'
   if (activeAdminView.value === 'business-storage') return 'Business verification file storage overview'
   return 'Admin navigation'
 })
@@ -1375,6 +1391,7 @@ const persistSidebarDropdownState = () => {
   writeLocalJson(ADMIN_SIDEBAR_DROPDOWNS_STORAGE_KEY, {
     userManagementOpen: userManagementOpen.value === true,
     paymentManagementOpen: paymentManagementOpen.value === true,
+    jobManagementOpen: jobManagementOpen.value === true,
     storageManagementOpen: storageManagementOpen.value === true,
   })
 }
@@ -1383,6 +1400,7 @@ const hydrateSidebarDropdownState = () => {
   const storedState = readLocalJson(ADMIN_SIDEBAR_DROPDOWNS_STORAGE_KEY, null)
   userManagementOpen.value = storedState?.userManagementOpen === true
   paymentManagementOpen.value = storedState?.paymentManagementOpen === true
+  jobManagementOpen.value = storedState?.jobManagementOpen === true
   storageManagementOpen.value = storedState?.storageManagementOpen === true
 }
 
@@ -1393,6 +1411,11 @@ const toggleUserManagement = () => {
 
 const togglePaymentManagement = () => {
   paymentManagementOpen.value = !paymentManagementOpen.value
+  persistSidebarDropdownState()
+}
+
+const toggleJobManagement = () => {
+  jobManagementOpen.value = !jobManagementOpen.value
   persistSidebarDropdownState()
 }
 
@@ -1815,17 +1838,48 @@ onMounted(() => {
   void getPublicJobs()
     .then((jobs) => {
       publicJobs.value = Array.isArray(jobs) ? jobs : []
+      if (usePublicJobFallbackForAdminViews) {
+        adminJobPosts.value = Array.isArray(jobs) ? [...jobs] : []
+      }
     })
     .catch(() => {
       publicJobs.value = []
+      if (usePublicJobFallbackForAdminViews) {
+        adminJobPosts.value = []
+      }
+    })
+
+  void getAllJobs()
+    .then((jobs) => {
+      usePublicJobFallbackForAdminViews = false
+      adminJobPosts.value = Array.isArray(jobs) ? jobs : []
+    })
+    .catch(() => {
+      usePublicJobFallbackForAdminViews = true
+      adminJobPosts.value = Array.isArray(publicJobs.value) ? [...publicJobs.value] : []
     })
 
   stopPublicJobs = subscribeToPublicJobs(
     (jobs) => {
       publicJobs.value = Array.isArray(jobs) ? jobs : []
+      if (usePublicJobFallbackForAdminViews) {
+        adminJobPosts.value = Array.isArray(jobs) ? [...jobs] : []
+      }
     },
     (error) => {
       console.error('Admin realtime jobs sync failed', error)
+    },
+  )
+
+  stopAllJobs = subscribeToAllJobs(
+    (jobs) => {
+      usePublicJobFallbackForAdminViews = false
+      adminJobPosts.value = Array.isArray(jobs) ? jobs : []
+    },
+    (error) => {
+      console.error('Admin realtime all jobs sync failed', error)
+      usePublicJobFallbackForAdminViews = true
+      adminJobPosts.value = Array.isArray(publicJobs.value) ? [...publicJobs.value] : []
     },
   )
 
@@ -1885,6 +1939,7 @@ onBeforeUnmount(() => {
   stopActivityLogs()
   stopAdminPlanCatalog()
   stopPublicJobs()
+  stopAllJobs()
   stopBusinessPaymentHistory()
   stopAllWorkspaceUserSubscriptions()
   clearAdminToastTimer()
@@ -1907,10 +1962,12 @@ onBeforeUnmount(() => {
       :primary-items="primaryItems"
       :user-management-items="userManagementItems"
       :payment-management-items="paymentManagementItems"
+      :job-management-items="jobManagementItems"
       :storage-management-items="storageManagementItems"
       :active-view="activeAdminView"
       :user-management-open="userManagementOpen"
       :payment-management-open="paymentManagementOpen"
+      :job-management-open="jobManagementOpen"
       :storage-management-open="storageManagementOpen"
       :secondary-items="secondaryItems"
       :profile-name="profileName"
@@ -1920,6 +1977,7 @@ onBeforeUnmount(() => {
       @open-setting="openSettingsModal('preferences')"
       @toggle-user-management="toggleUserManagement"
       @toggle-payment-management="togglePaymentManagement"
+      @toggle-job-management="toggleJobManagement"
       @toggle-storage-management="toggleStorageManagement"
     />
 
@@ -2376,6 +2434,18 @@ onBeforeUnmount(() => {
               v-else-if="activeAdminView === 'preview-plan'"
               @create-new="setAdminView('create-plan')"
               @plan-status-updated="handlePlanStatusUpdated"
+            />
+
+            <AdminJobPostList
+              v-else-if="activeAdminView === 'all-job-post'"
+              :jobs="adminJobPosts"
+              mode="all"
+            />
+
+            <AdminJobPostList
+              v-else-if="activeAdminView === 'test-job-post'"
+              :jobs="adminJobPosts"
+              mode="test"
             />
 
             <AdminBusinessStorage
@@ -4157,29 +4227,34 @@ onBeforeUnmount(() => {
 }
 
 .dashboard-payment-action-btn {
-  width: 2.2rem;
-  height: 2.2rem;
-  border: 0;
-  border-radius: 0.45rem;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: 1px solid rgba(122, 179, 145, 0.18);
+  border-radius: 0.82rem;
   display: grid;
   place-items: center;
-  background: transparent;
-  color: #8a978f;
+  background: #ffffff;
+  color: #2b5540;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
   cursor: pointer;
   transition:
-    transform 0.2s ease,
-    background-color 0.2s ease,
-    color 0.2s ease;
+    transform 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .dashboard-payment-action-btn i {
-  font-size: 1rem;
+  font-size: 0.95rem;
 }
 
 .dashboard-payment-action-btn:hover {
-  transform: none;
-  background: rgba(235, 247, 240, 0.98);
-  color: #2d684d;
+  transform: translateY(-1px);
+  background: #ffffff;
+  color: #2b5540;
+  border-color: rgba(47, 106, 73, 0.26);
+  box-shadow: 0 12px 20px rgba(31, 74, 51, 0.08);
 }
 
 .admin-logs-panel {

@@ -1758,29 +1758,34 @@ const handleBulkApplicantDelete = async () => {
 }
 
 .applicant-list-action-btn {
-  width: 2.2rem;
-  height: 2.2rem;
-  border: 0;
-  border-radius: 0.45rem;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: 1px solid rgba(122, 179, 145, 0.18);
+  border-radius: 0.82rem;
   display: grid;
   place-items: center;
-  background: transparent;
-  color: #8a978f;
+  background: #ffffff;
+  color: #2b5540;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
   cursor: pointer;
   transition:
-    transform 0.2s ease,
-    background-color 0.2s ease,
-    color 0.2s ease;
+    transform 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .applicant-list-action-btn i {
-  font-size: 1rem;
+  font-size: 0.95rem;
 }
 
 .applicant-list-action-btn:hover {
-  transform: none;
-  background: rgba(235, 247, 240, 0.98);
-  color: #2d684d;
+  transform: translateY(-1px);
+  background: #ffffff;
+  color: #2b5540;
+  border-color: rgba(47, 106, 73, 0.26);
+  box-shadow: 0 12px 20px rgba(31, 74, 51, 0.08);
 }
 
 .applicant-list-action-btn:disabled {
@@ -1788,21 +1793,42 @@ const handleBulkApplicantDelete = async () => {
   cursor: not-allowed;
   pointer-events: none;
   transform: none;
+  box-shadow: none;
+}
+
+.applicant-list-action-btn--approve {
+  border-color: rgba(82, 175, 118, 0.2);
+  color: #2e6d45;
 }
 
 .applicant-list-action-btn--approve:hover {
   background: rgba(235, 247, 240, 0.98);
   color: #228454;
+  border-color: rgba(82, 175, 118, 0.28);
+}
+
+.applicant-list-action-btn--reject {
+  border-color: rgba(214, 120, 92, 0.2);
+  color: #9b4126;
+  background: rgba(255, 247, 245, 0.98);
 }
 
 .applicant-list-action-btn--reject:hover {
   background: rgba(252, 239, 239, 0.98);
   color: #a54545;
+  border-color: rgba(214, 120, 92, 0.28);
+}
+
+.applicant-list-action-btn--danger {
+  border-color: rgba(214, 120, 92, 0.2);
+  color: #9b4126;
+  background: rgba(255, 247, 245, 0.98);
 }
 
 .applicant-list-action-btn--danger:hover {
   background: rgba(252, 239, 239, 0.98);
   color: #a54545;
+  border-color: rgba(214, 120, 92, 0.28);
 }
 
 .applicant-list-table__actions-head,

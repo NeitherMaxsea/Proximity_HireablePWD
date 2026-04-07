@@ -75,9 +75,7 @@ export const validateAuthenticatedRouteAccess = async (routeMeta = {}) => {
   }
 
   if (routeMeta.role === 'employer' && routeMeta.employerType) {
-    const storedEmployerType = normalizeEmployerOrganizationType(
-      resolvedUser?.company_organization_type || resolvedUser?.companyOrganizationType,
-    )
+    const storedEmployerType = normalizeEmployerOrganizationType(resolvedUser)
 
     if (!storedEmployerType) {
       return {

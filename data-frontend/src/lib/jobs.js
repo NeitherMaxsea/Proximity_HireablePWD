@@ -342,12 +342,33 @@ export const getPublicJobs = async () => {
   }
 }
 
+export const getAllJobs = async () => {
+  try {
+    const snapshot = await getDocs(collection(db, JOBS_COLLECTION))
+    return mapSnapshotToJobs(snapshot.docs)
+  } catch {
+    return []
+  }
+}
+
 export const subscribeToPublicJobs = (handleNext, handleError) =>
   onSnapshot(
     query(collection(db, JOBS_COLLECTION), where('status', '==', PUBLIC_JOB_STATUS)),
     (snapshot) => {
       const jobs = filterPublicJobs(mapSnapshotToJobs(snapshot.docs))
       cacheJobs(jobs)
+      if (typeof handleNext === 'function') handleNext(jobs)
+    },
+    (error) => {
+      if (typeof handleError === 'function') handleError(error)
+    },
+  )
+
+export const subscribeToAllJobs = (handleNext, handleError) =>
+  onSnapshot(
+    collection(db, JOBS_COLLECTION),
+    (snapshot) => {
+      const jobs = mapSnapshotToJobs(snapshot.docs)
       if (typeof handleNext === 'function') handleNext(jobs)
     },
     (error) => {

@@ -6,37 +6,37 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  applicantName: {
+    type: String,
+    default: 'Applicant',
+  },
+  applicantEmail: {
+    type: String,
+    default: 'No email available',
+  },
+  applicantAvatarUrl: {
+    type: String,
+    default: '',
+  },
+  
+  applicantInitials: {
+    type: String,
+    default: 'AP',
+  },
   sidebarItems: {
     type: Array,
     required: true,
   },
-  sidebarSettingsItem: {
-    type: Object,
-    required: true,
-  },
-  showProfileItem: {
-    type: Boolean,
-    default: true,
-  },
-  showSettingsItem: {
-    type: Boolean,
-    default: true,
-  },
-  showHelpCenterItem: {
-    type: Boolean,
-    default: true,
-  },
 })
 
-const emit = defineEmits(['select-section', 'open-help-center'])
+const emit = defineEmits(['select-section'])
 
 const selectSection = (sectionId) => {
   emit('select-section', sectionId)
 }
 
-const openHelpCenter = () => {
-  emit('open-help-center')
-}
+const getSidebarDescription = (item) =>
+  String(item?.description || '').trim() || 'Open this applicant workspace section.'
 </script>
 
 <template>
@@ -44,68 +44,58 @@ const openHelpCenter = () => {
     <div class="applicant-sidebar__ambient applicant-sidebar__ambient--top" aria-hidden="true" />
     <div class="applicant-sidebar__ambient applicant-sidebar__ambient--bottom" aria-hidden="true" />
 
-    <div class="applicant-sidebar__brand">
-      <div class="applicant-sidebar__brand-mark">
-        <img :src="mathLogo" alt="Applicant sidebar logo" class="applicant-sidebar__brand-logo" />
+    <div class="applicant-sidebar__main">
+      <div class="applicant-sidebar__brand">
+        <div class="applicant-sidebar__brand-mark">
+          <img :src="mathLogo" alt="Applicant sidebar logo" class="applicant-sidebar__brand-logo" />
+        </div>
+        <div class="applicant-sidebar__brand-copy">
+          <span>PWD Platform</span>
+          <strong>Applicant Workspace</strong>
+        </div>
       </div>
-      <div class="applicant-sidebar__brand-copy">
-        <span>PWD Platform</span>
-        <strong>Applicant Workspace</strong>
+
+      <div class="applicant-sidebar__nav-head" aria-hidden="true">
+        <span>Workspace Menu</span>
       </div>
+
+      <nav class="applicant-sidebar__nav">
+        <button
+          v-for="item in sidebarItems"
+          :key="item.id"
+          type="button"
+          class="applicant-sidebar__link"
+          :class="{ 'is-active': activeSection === item.id }"
+          :aria-current="activeSection === item.id ? 'page' : undefined"
+          @click="selectSection(item.id)"
+        >
+          <span class="applicant-sidebar__link-glow" aria-hidden="true" />
+          <span class="applicant-sidebar__link-icon" aria-hidden="true">
+            <i :class="item.icon" />
+          </span>
+          <span class="applicant-sidebar__link-copy">
+            <span class="applicant-sidebar__link-label">{{ item.label }}</span>
+            <small class="applicant-sidebar__link-meta">{{ getSidebarDescription(item) }}</small>
+          </span>
+        </button>
+      </nav>
     </div>
 
-    <nav class="applicant-sidebar__nav">
-      <button
-        v-for="item in sidebarItems"
-        :key="item.id"
-        type="button"
-        class="applicant-sidebar__link"
-        :class="{ 'is-active': activeSection === item.id }"
-        :aria-current="activeSection === item.id ? 'page' : undefined"
-        @click="selectSection(item.id)"
-      >
-        <span class="applicant-sidebar__link-glow" aria-hidden="true" />
-        <span class="applicant-sidebar__link-icon" aria-hidden="true">
-          <i :class="item.icon" />
-        </span>
-        <span class="applicant-sidebar__link-label">{{ item.label }}</span>
-        <span v-if="activeSection === item.id" class="applicant-sidebar__active-mark" aria-hidden="true" />
-      </button>
-    </nav>
-
-    <div class="applicant-sidebar__divider" aria-hidden="true" />
-
-    <div class="applicant-sidebar__footer">
-      <p class="applicant-sidebar__footer-title">Account</p>
-
-      <button
-        v-if="showProfileItem"
-        type="button"
-        class="applicant-sidebar__footer-link"
-        :class="{ 'is-active': activeSection === 'profile' }"
-        @click="selectSection('profile')"
-      >
-        <i class="bi bi-person-circle" aria-hidden="true" />
-        <span>My Profile</span>
-      </button>
-
-      <button
-        v-if="showSettingsItem"
-        type="button"
-        class="applicant-sidebar__footer-link"
-        :class="{ 'is-active': activeSection === sidebarSettingsItem.id }"
-        :aria-current="activeSection === sidebarSettingsItem.id ? 'page' : undefined"
-        @click="selectSection(sidebarSettingsItem.id)"
-      >
-        <i :class="sidebarSettingsItem.icon" aria-hidden="true" />
-        <span>{{ sidebarSettingsItem.label }}</span>
-      </button>
-
-      <button v-if="showHelpCenterItem" type="button" class="applicant-sidebar__footer-link" @click="openHelpCenter">
-        <i class="bi bi-question-circle" aria-hidden="true" />
-        <span>Help Center</span>
-      </button>
-    </div>
+    <section class="applicant-sidebar__profile" aria-label="Applicant profile summary">
+      <div class="applicant-sidebar__profile-avatar">
+        <img
+          v-if="applicantAvatarUrl"
+          :src="applicantAvatarUrl"
+          :alt="`${applicantName} avatar`"
+          class="applicant-sidebar__profile-image"
+        />
+        <template v-else>{{ applicantInitials }}</template>
+      </div>
+      <div class="applicant-sidebar__profile-copy">
+        <strong :title="applicantName">{{ applicantName }}</strong>
+        <span :title="applicantEmail">{{ applicantEmail }}</span>
+      </div>
+    </section>
   </aside>
 </template>
 

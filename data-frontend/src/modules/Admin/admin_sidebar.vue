@@ -20,6 +20,10 @@ defineProps({
     type: Array,
     default: () => [],
   },
+  jobManagementItems: {
+    type: Array,
+    default: () => [],
+  },
   storageManagementItems: {
     type: Array,
     default: () => [],
@@ -37,6 +41,10 @@ defineProps({
     default: false,
   },
   paymentManagementOpen: {
+    type: Boolean,
+    default: false,
+  },
+  jobManagementOpen: {
     type: Boolean,
     default: false,
   },
@@ -58,7 +66,14 @@ defineProps({
   },
 })
 
-defineEmits(['set-view', 'open-setting', 'toggle-user-management', 'toggle-payment-management', 'toggle-storage-management'])
+defineEmits([
+  'set-view',
+  'open-setting',
+  'toggle-user-management',
+  'toggle-payment-management',
+  'toggle-job-management',
+  'toggle-storage-management',
+])
 </script>
 
 <template>
@@ -149,6 +164,42 @@ defineEmits(['set-view', 'open-setting', 'toggle-user-management', 'toggle-payme
           <div v-if="paymentManagementOpen" class="admin-submenu" aria-label="Payment management submenu">
             <button
               v-for="item in paymentManagementItems"
+              :key="item.label"
+              class="admin-submenu__item"
+              :class="{ 'is-active': activeView === item.key }"
+              type="button"
+              @click="$emit('set-view', item.key)"
+            >
+              <span class="admin-nav-button__left">
+                <i :class="item.icon" aria-hidden="true" />
+                <span>{{ item.label }}</span>
+              </span>
+            </button>
+          </div>
+        </Transition>
+      </div>
+
+      <div class="admin-dropdown-group">
+        <button
+          class="admin-nav-button admin-nav-button--dropdown"
+          :class="{ 'is-active-soft': jobManagementItems.some((item) => item.key === activeView) }"
+          type="button"
+          :aria-expanded="jobManagementOpen ? 'true' : 'false'"
+          @click="$emit('toggle-job-management')"
+        >
+          <span class="admin-nav-button__left">
+            <i class="bi bi-briefcase-fill" aria-hidden="true" />
+            <span>Job Management</span>
+          </span>
+          <span class="admin-nav-button__chevron" :class="{ 'is-open': jobManagementOpen }">
+            <i class="bi bi-chevron-down" aria-hidden="true" />
+          </span>
+        </button>
+
+        <Transition name="admin-submenu-collapse">
+          <div v-if="jobManagementOpen" class="admin-submenu" aria-label="Job management submenu">
+            <button
+              v-for="item in jobManagementItems"
               :key="item.label"
               class="admin-submenu__item"
               :class="{ 'is-active': activeView === item.key }"

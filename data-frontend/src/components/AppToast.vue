@@ -6,6 +6,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  position: {
+    type: String,
+    default: 'top-right',
+  },
 })
 
 const emit = defineEmits(['close'])
@@ -21,11 +25,22 @@ const toastIcon = computed(() => {
   if (toastKind.value === 'success') return 'bi bi-check-circle-fill'
   return 'bi bi-info-circle-fill'
 })
+
+const toastPosition = computed(() => {
+  const normalizedPosition = String(props.position || 'top-right').trim().toLowerCase()
+  return ['top-right', 'bottom-left'].includes(normalizedPosition) ? normalizedPosition : 'top-right'
+})
 </script>
 
 <template>
-  <transition name="app-toast">
-    <div v-if="toast" class="app-toast" :class="`app-toast--${toastKind}`" role="status" aria-live="polite">
+  <transition :name="toastPosition === 'bottom-left' ? 'app-toast-bottom-left' : 'app-toast'">
+    <div
+      v-if="toast"
+      class="app-toast"
+      :class="[`app-toast--${toastKind}`, `app-toast--${toastPosition}`]"
+      role="status"
+      aria-live="polite"
+    >
       <div class="app-toast__icon" :class="`app-toast__icon--${toastKind}`" aria-hidden="true">
         <i :class="toastIcon" />
       </div>
@@ -43,8 +58,6 @@ const toastIcon = computed(() => {
 <style scoped>
 .app-toast {
   position: fixed;
-  top: 1.25rem;
-  right: 1.25rem;
   z-index: 140;
   width: min(25rem, calc(100vw - 2rem));
   display: grid;
@@ -56,6 +69,16 @@ const toastIcon = computed(() => {
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 22px 42px rgba(16, 41, 29, 0.16);
   backdrop-filter: blur(12px);
+}
+
+.app-toast--top-right {
+  top: 1.25rem;
+  right: 1.25rem;
+}
+
+.app-toast--bottom-left {
+  bottom: 1.5rem;
+  left: 1.5rem;
 }
 
 .app-toast--error {
@@ -147,10 +170,27 @@ const toastIcon = computed(() => {
   transform: translate3d(0, -0.55rem, 0);
 }
 
+.app-toast-bottom-left-enter-active,
+.app-toast-bottom-left-leave-active {
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.app-toast-bottom-left-enter-from,
+.app-toast-bottom-left-leave-to {
+  opacity: 0;
+  transform: translate3d(0, 0.55rem, 0);
+}
+
 @media (max-width: 640px) {
-  .app-toast {
+  .app-toast--top-right {
     top: 0.85rem;
     right: 0.85rem;
+    width: calc(100vw - 1.2rem);
+  }
+
+  .app-toast--bottom-left {
+    left: 0.85rem;
+    bottom: 0.85rem;
     width: calc(100vw - 1.2rem);
   }
 }

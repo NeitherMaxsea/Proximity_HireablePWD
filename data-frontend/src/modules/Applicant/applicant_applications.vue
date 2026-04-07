@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const props = defineProps({
   applicationRecords: {
@@ -48,40 +48,74 @@ const selectedApplicationCount = computed(() => selectedVisibleApplicationIds.va
 const allApplicationsSelected = computed(
   () => visibleApplicationIds.value.length > 0 && selectedApplicationCount.value === visibleApplicationIds.value.length,
 )
+const isSelectionMode = ref(false)
+const showDeleteConfirmModal = ref(false)
+const pendingDeleteApplicationIds = ref([])
 const deleteSelectedButtonLabel = computed(() => {
   if (props.isDeletingApplications) return 'Deleting...'
   if (!selectedApplicationCount.value) return 'Delete Selected'
   return `Delete Selected (${selectedApplicationCount.value})`
 })
-const emptyStateHighlights = [
-  {
-    id: 'discover',
-    icon: 'bi bi-search',
-    label: 'Browse matching jobs',
-    copy: 'Open Find Jobs and look for roles that fit your skills, preferred setup, and accessibility needs.',
-  },
-  {
-    id: 'submit',
-    icon: 'bi bi-send-check',
-    label: 'Submit one application',
-    copy: 'After you apply, this page starts collecting your live employer updates automatically.',
-  },
-  {
-    id: 'track',
-    icon: 'bi bi-activity',
-    label: 'Track every status change',
-    copy: 'Review screening progress, interview schedules, and final decisions in one submission tracker.',
-  },
-]
-
-const timelineDotClass = (step) => {
+const pendingDeleteApplicationCount = computed(() => pendingDeleteApplicationIds.value.length)
+const pendingDeleteApplicationLabel = computed(() =>
+  pendingDeleteApplicationCount.value === 1 ? 'application' : 'applications',
+)
+const getTimelineStepTone = (step) => {
   const tone = String(step?.tone || 'warning').trim().toLowerCase()
-  return `applicant-applications-page__timeline-dot--${tone}`
+  if (['success', 'danger', 'info', 'muted'].includes(tone)) return tone
+  return 'warning'
 }
 
-const timelineLineClass = (step) => {
-  const tone = String(step?.tone || 'warning').trim().toLowerCase()
-  return `applicant-applications-page__timeline-line--${tone}`
+const getTimelineStepState = (step, index, steps = []) => {
+  const tone = getTimelineStepTone(step)
+  if (tone === 'success') return 'complete'
+  if (tone === 'danger' || tone === 'muted') return 'failed'
+
+  const hasPreviousOpenStep = steps
+    .slice(0, index)
+    .some((timelineStep) => getTimelineStepTone(timelineStep) !== 'success')
+
+  return hasPreviousOpenStep ? 'pending' : 'active'
+}
+
+const timelineItemClass = (step, index, steps) =>
+  `applicant-applications-page__timeline-item--${getTimelineStepState(step, index, steps)}`
+
+const timelineDotClass = (step, index, steps) => [
+  `applicant-applications-page__timeline-dot--${getTimelineStepTone(step)}`,
+  `applicant-applications-page__timeline-dot--${getTimelineStepState(step, index, steps)}`,
+]
+
+const timelineLineClass = (step, index, steps) => {
+  const stepState = getTimelineStepState(step, index, steps)
+  return [
+    `applicant-applications-page__timeline-line--${getTimelineStepTone(step)}`,
+    `applicant-applications-page__timeline-line--${stepState === 'active' ? 'partial' : stepState === 'pending' ? 'empty' : 'filled'}`,
+  ]
+}
+
+const timelineVisualIcon = (step) => {
+  const timelineId = String(step?.id || '').trim().toLowerCase()
+
+  if (timelineId.startsWith('application-sent')) return 'bi bi-send'
+  if (timelineId.startsWith('technical-assessment')) return 'bi bi-clipboard2-pulse'
+  if (timelineId.startsWith('initial-interview')) return 'bi bi-camera-video'
+  if (timelineId.startsWith('final-interview')) return 'bi bi-people'
+  if (timelineId.startsWith('job-offer')) return 'bi bi-briefcase'
+  if (timelineId.startsWith('training')) return 'bi bi-mortarboard'
+  return 'bi bi-circle'
+}
+
+const timelineBadgeClass = (step, index, steps) => [
+  `applicant-applications-page__timeline-badge--${getTimelineStepTone(step)}`,
+  `applicant-applications-page__timeline-badge--${getTimelineStepState(step, index, steps)}`,
+]
+
+const timelineBadgeIcon = (step, index, steps) => {
+  const stepState = getTimelineStepState(step, index, steps)
+  if (stepState === 'complete') return 'bi bi-check-lg'
+  if (stepState === 'failed') return 'bi bi-x-lg'
+  return ''
 }
 
 const emitSelectedApplicationIds = (applicationIds = []) => {
@@ -96,11 +130,25 @@ const emitSelectedApplicationIds = (applicationIds = []) => {
 const isApplicationSelected = (applicationId) =>
   selectedApplicationIdSet.value.has(String(applicationId || '').trim())
 
+const enterSelectionMode = () => {
+  if (props.isDeletingApplications || !visibleApplicationIds.value.length) return
+  isSelectionMode.value = true
+}
+
+const exitSelectionMode = () => {
+  if (props.isDeletingApplications) return
+  closeDeleteConfirmModal()
+  isSelectionMode.value = false
+  emitSelectedApplicationIds([])
+}
+
 const toggleApplicationSelection = (applicationId) => {
   if (props.isDeletingApplications) return
 
   const normalizedApplicationId = String(applicationId || '').trim()
   if (!normalizedApplicationId) return
+
+  isSelectionMode.value = true
 
   const nextSelectedIds = new Set(selectedVisibleApplicationIds.value)
   if (nextSelectedIds.has(normalizedApplicationId)) {
@@ -120,59 +168,76 @@ const toggleAllApplicationsSelection = () => {
 
 const requestDeleteSelectedApplications = () => {
   if (props.isDeletingApplications || !selectedVisibleApplicationIds.value.length) return
-  emit('delete-selected-applications', selectedVisibleApplicationIds.value)
+  pendingDeleteApplicationIds.value = [...selectedVisibleApplicationIds.value]
+  showDeleteConfirmModal.value = true
 }
+
+const closeDeleteConfirmModal = () => {
+  if (props.isDeletingApplications) return
+  showDeleteConfirmModal.value = false
+  pendingDeleteApplicationIds.value = []
+}
+
+const confirmDeleteSelectedApplications = () => {
+  if (props.isDeletingApplications || !pendingDeleteApplicationIds.value.length) return
+
+  const applicationIds = [...pendingDeleteApplicationIds.value]
+  showDeleteConfirmModal.value = false
+  pendingDeleteApplicationIds.value = []
+  emit('delete-selected-applications', applicationIds)
+}
+
+watch(selectedApplicationCount, (count) => {
+  if (count > 0) isSelectionMode.value = true
+})
+
+watch(visibleApplicationIds, (applicationIds) => {
+  if (!applicationIds.length) {
+    pendingDeleteApplicationIds.value = []
+    showDeleteConfirmModal.value = false
+    isSelectionMode.value = false
+  }
+})
+
+watch(
+  () => props.isDeletingApplications,
+  (isDeleting, wasDeleting) => {
+    if (wasDeleting && !isDeleting && !selectedApplicationCount.value) {
+      isSelectionMode.value = false
+    }
+  },
+)
+
+watch(selectedApplicationCount, (count) => {
+  if (!count && !props.isDeletingApplications) {
+    pendingDeleteApplicationIds.value = []
+    showDeleteConfirmModal.value = false
+  }
+})
 </script>
 
 <template>
   <section class="applicant-applications-page">
-    <section class="applicant-applications-page__grid">
-      <aside class="applicant-applications-page__rail">
-        <article class="applicant-applications-page__profile-card">
-          <div class="applicant-applications-page__profile-head">
-            <span class="applicant-applications-page__profile-badge">Applicant</span>
-            <span class="applicant-applications-page__profile-status">Applications</span>
-          </div>
 
-          <div class="applicant-applications-page__identity">
-            <p class="applicant-applications-page__eyebrow">My Applications</p>
-            <h2>Submission Tracker</h2>
-            <p>Review every submitted job application, its current status, and your latest updates.</p>
-          </div>
-
-          <div class="applicant-applications-page__mini-list">
-            <div class="applicant-applications-page__mini-item">
-              <span><i class="bi bi-send-check" aria-hidden="true" /> Total Applied</span>
-              <strong>{{ applicationStats.applied || 0 }}</strong>
-            </div>
-            <div class="applicant-applications-page__mini-item">
-              <span><i class="bi bi-hourglass-split" aria-hidden="true" /> Pending</span>
-              <strong>{{ applicationStats.pending || 0 }}</strong>
-            </div>
-            <div class="applicant-applications-page__mini-item">
-              <span><i class="bi bi-calendar2-check" aria-hidden="true" /> For Interview</span>
-              <strong>{{ applicationStats.interview || 0 }}</strong>
-            </div>
-            <div class="applicant-applications-page__mini-item applicant-applications-page__mini-item--outcome">
-              <span><i class="bi bi-clipboard-data" aria-hidden="true" /> Outcome</span>
-              <strong>{{ applicationOutcomeLabel }}</strong>
-            </div>
-          </div>
-        </article>
-      </aside>
-
-      <article class="applicant-applications-page__panel">
+    <article class="applicant-applications-page__panel">
         <div class="applicant-panel__head applicant-panel__head--applications">
           <div>
             <h3>Application Records</h3>
             <span>Live status from your submitted jobs</span>
           </div>
           <div class="applicant-applications-page__head-actions">
-            <span class="applicant-applications-page__head-count">
-              {{ applicationRecords.length }} application<span v-if="applicationRecords.length !== 1">s</span>
-            </span>
+            <button
+              v-if="applicationRecords.length && !isSelectionMode"
+              type="button"
+              class="applicant-applications-page__select-button"
+              :disabled="isDeletingApplications"
+              @click="enterSelectionMode"
+            >
+              <i class="bi bi-check2-square" aria-hidden="true" />
+              Select
+            </button>
 
-            <div v-if="applicationRecords.length" class="applicant-applications-page__bulk-actions">
+            <div v-else-if="applicationRecords.length" class="applicant-applications-page__bulk-actions">
               <label class="applicant-applications-page__bulk-toggle">
                 <input
                   type="checkbox"
@@ -197,24 +262,47 @@ const requestDeleteSelectedApplications = () => {
                 <i class="bi bi-trash3" aria-hidden="true" />
                 {{ deleteSelectedButtonLabel }}
               </button>
+
+              <button
+                type="button"
+                class="applicant-applications-page__secondary-button"
+                :disabled="isDeletingApplications"
+                @click="exitSelectionMode"
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>
 
         <div v-if="applicationRecords.length" class="applicant-applications-page__list">
           <article
-            v-for="record in applicationRecords"
+            v-for="(record, recordIndex) in applicationRecords"
             :key="record.id"
             class="applicant-applications-page__card"
             :class="{ 'applicant-applications-page__card--inactive': record.isDiscontinued }"
+            :style="{ '--card-enter-delay': `${recordIndex * 60}ms` }"
           >
-            <div class="applicant-applications-page__card-top">
-              <div>
-                <h4>{{ record.title }}</h4>
-                <p>{{ record.company }}</p>
+            <!-- Card accent bar -->
+            <div class="applicant-applications-page__card-accent" aria-hidden="true" />
+
+            <!-- Header with company initial + job title + status -->
+            <div class="applicant-applications-page__card-header">
+              <div class="applicant-applications-page__card-brand">
+                <div class="applicant-applications-page__card-avatar" aria-hidden="true">
+                  {{ (record.company || 'C').charAt(0).toUpperCase() }}
+                </div>
+                <div class="applicant-applications-page__card-identity">
+                  <h4>{{ record.title }}</h4>
+                  <p class="applicant-applications-page__card-company">
+                    <i class="bi bi-building" />
+                    {{ record.company }}
+                  </p>
+                </div>
               </div>
+
               <div class="applicant-applications-page__card-actions">
-                <label class="applicant-applications-page__card-checkbox">
+                <label v-if="isSelectionMode" class="applicant-applications-page__card-checkbox">
                   <input
                     type="checkbox"
                     :checked="isApplicationSelected(record.id)"
@@ -224,53 +312,78 @@ const requestDeleteSelectedApplications = () => {
                   >
                   <span>Select</span>
                 </label>
-
                 <span class="applicant-status-pill" :class="`applicant-status-pill--${record.statusTone}`">
+                  <i
+                    class="applicant-status-pill__icon"
+                    :class="{
+                      'bi bi-hourglass-split': record.statusTone === 'pending',
+                      'bi bi-check-circle-fill': record.statusTone === 'success',
+                      'bi bi-x-circle-fill': record.statusTone === 'danger',
+                      'bi bi-camera-video-fill': record.statusTone === 'info',
+                    }"
+                    aria-hidden="true"
+                  />
                   {{ record.statusLabel }}
                 </span>
               </div>
             </div>
 
-            <div class="applicant-applications-page__meta">
-              <span class="applicant-applications-page__pill applicant-applications-page__pill--location">
-                <i class="bi bi-geo-alt" />
-                {{ record.location }}
-              </span>
-              <span class="applicant-applications-page__pill applicant-applications-page__pill--type">
-                <i class="bi bi-briefcase" />
-                {{ record.jobType }}
-              </span>
-              <span class="applicant-applications-page__pill applicant-applications-page__pill--salary">
-                <i class="bi bi-cash-stack" />
-                {{ record.salaryLabel }}
-              </span>
-              <span class="applicant-applications-page__pill applicant-applications-page__pill--pwd">
-                <i class="bi bi-universal-access-circle" />
-                {{ record.disabilityLabel }}
-              </span>
-              <span class="applicant-applications-page__pill applicant-applications-page__pill--date">
-                <i class="bi bi-calendar-event" />
-                Applied {{ record.submittedAtLabel }}
-              </span>
-              <span class="applicant-applications-page__pill applicant-applications-page__pill--source">
-                <i class="bi bi-database" />
-                {{ record.sourceLabel }}
-              </span>
+            <!-- Meta pills in a styled bar -->
+            <div class="applicant-applications-page__meta-bar">
+              <div class="applicant-applications-page__meta">
+                <span class="applicant-applications-page__pill applicant-applications-page__pill--location">
+                  <i class="bi bi-geo-alt-fill" />
+                  {{ record.location }}
+                </span>
+                <span class="applicant-applications-page__pill applicant-applications-page__pill--type">
+                  <i class="bi bi-briefcase-fill" />
+                  {{ record.jobType }}
+                </span>
+                <span class="applicant-applications-page__pill applicant-applications-page__pill--salary">
+                  <i class="bi bi-cash-coin" />
+                  {{ record.salaryLabel }}
+                </span>
+                <span class="applicant-applications-page__pill applicant-applications-page__pill--pwd">
+                  <i class="bi bi-universal-access-circle" />
+                  {{ record.disabilityLabel }}
+                </span>
+              </div>
+              <div class="applicant-applications-page__meta-secondary">
+                <span class="applicant-applications-page__meta-tag">
+                  <i class="bi bi-calendar-check" />
+                  Applied {{ record.submittedAtLabel }}
+                </span>
+                <span class="applicant-applications-page__meta-divider" aria-hidden="true" />
+                <span class="applicant-applications-page__meta-tag">
+                  <i class="bi bi-database" />
+                  {{ record.sourceLabel }}
+                </span>
+              </div>
             </div>
 
+            <!-- Status description -->
             <div class="applicant-applications-page__status-copy">
-              <p v-if="!record.isDiscontinued" class="applicant-applications-page__status-note">{{ record.statusDescription }}</p>
+              <p v-if="!record.isDiscontinued" class="applicant-applications-page__status-note">
+                <i class="bi bi-info-circle" />
+                {{ record.statusDescription }}
+              </p>
               <p v-if="record.isDiscontinued" class="applicant-applications-page__status-note applicant-applications-page__status-note--discontinued">
+                <i class="bi bi-exclamation-triangle-fill" />
                 {{ record.discontinuedReason || 'The job post was deleted and this application was discontinued.' }}
               </p>
               <p v-else-if="record.rejectionReason" class="applicant-applications-page__status-note applicant-applications-page__status-note--danger">
+                <i class="bi bi-x-octagon" />
                 Rejection reason: {{ record.rejectionReason }}
               </p>
             </div>
 
+            <!-- Timeline (kept as-is — user said it's good) -->
             <section class="applicant-applications-page__timeline">
               <div class="applicant-applications-page__timeline-head">
-                <h5>Status Timeline</h5>
+                <h5>
+                  <i class="bi bi-signpost-split" />
+                  Status Timeline
+                </h5>
                 <span>Track the current hiring flow for this job post.</span>
               </div>
 
@@ -279,13 +392,19 @@ const requestDeleteSelectedApplications = () => {
                   v-for="(step, index) in record.timelineItems"
                   :key="step.id"
                   class="applicant-applications-page__timeline-item"
+                  :class="timelineItemClass(step, index, record.timelineItems)"
                 >
                   <div class="applicant-applications-page__timeline-marker" aria-hidden="true">
-                    <span class="applicant-applications-page__timeline-dot" :class="timelineDotClass(step)" />
+                    <span class="applicant-applications-page__timeline-dot" :class="timelineDotClass(step, index, record.timelineItems)">
+                      <i :class="timelineVisualIcon(step)" />
+                    </span>
+                    <span class="applicant-applications-page__timeline-badge" :class="timelineBadgeClass(step, index, record.timelineItems)">
+                      <i v-if="timelineBadgeIcon(step, index, record.timelineItems)" :class="timelineBadgeIcon(step, index, record.timelineItems)" />
+                    </span>
                     <span
                       v-if="index !== record.timelineItems.length - 1"
                       class="applicant-applications-page__timeline-line"
-                      :class="timelineLineClass(step)"
+                      :class="timelineLineClass(step, index, record.timelineItems)"
                     />
                   </div>
 
@@ -297,9 +416,13 @@ const requestDeleteSelectedApplications = () => {
               </div>
             </section>
 
-            <p class="applicant-applications-page__status-note applicant-applications-page__status-note--muted">
-              Last updated {{ record.lastUpdatedLabel }}
-            </p>
+            <!-- Footer -->
+            <div class="applicant-applications-page__card-footer">
+              <span class="applicant-applications-page__footer-updated">
+                <i class="bi bi-clock-history" />
+                Last updated {{ record.lastUpdatedLabel }}
+              </span>
+            </div>
           </article>
         </div>
 
@@ -312,38 +435,58 @@ const requestDeleteSelectedApplications = () => {
               <p class="applicant-applications-page__empty-overline">Application Tracker</p>
               <h3>No applications yet</h3>
               <p>Once you apply to a job, your submitted applications will appear here together with status updates, interview progress, and final employer decisions.</p>
-
-              <div class="applicant-applications-page__empty-tags">
-                <span>Status updates appear here</span>
-                <span>Interview notes stay visible</span>
-                <span>Everything stays in one tracker</span>
-              </div>
-            </section>
-
-            <section class="applicant-applications-page__empty-highlights">
-              <article
-                v-for="item in emptyStateHighlights"
-                :key="item.id"
-                class="applicant-applications-page__empty-highlight"
-              >
-                <span class="applicant-applications-page__empty-highlight-icon" aria-hidden="true">
-                  <i :class="item.icon" />
-                </span>
-
-                <div class="applicant-applications-page__empty-highlight-copy">
-                  <strong>{{ item.label }}</strong>
-                  <p>{{ item.copy }}</p>
-                </div>
-              </article>
             </section>
           </div>
         </div>
+
+        <transition name="applicant-applications-page__modal">
+          <div
+            v-if="showDeleteConfirmModal"
+            class="applicant-applications-page__modal-overlay"
+            role="presentation"
+            @click.self="closeDeleteConfirmModal"
+          >
+            <div
+              class="applicant-applications-page__modal-card"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="applicant-applications-delete-modal-title"
+            >
+              <span class="applicant-applications-page__modal-icon" aria-hidden="true">
+                <i class="bi bi-trash3" />
+              </span>
+              <p class="applicant-applications-page__modal-eyebrow">Delete Application Record</p>
+              <h3 id="applicant-applications-delete-modal-title">Delete selected {{ pendingDeleteApplicationLabel }}?</h3>
+              <p class="applicant-applications-page__modal-copy">
+                This will remove {{ pendingDeleteApplicationCount }} {{ pendingDeleteApplicationLabel }} from your application records.
+              </p>
+              <div class="applicant-applications-page__modal-actions">
+                <button
+                  type="button"
+                  class="applicant-applications-page__modal-button applicant-applications-page__modal-button--ghost"
+                  :disabled="isDeletingApplications"
+                  @click="closeDeleteConfirmModal"
+                >
+                  No
+                </button>
+                <button
+                  type="button"
+                  class="applicant-applications-page__modal-button applicant-applications-page__modal-button--danger"
+                  :disabled="isDeletingApplications"
+                  @click="confirmDeleteSelectedApplications"
+                >
+                  Yes
+                </button>
+              </div>
+            </div>
+          </div>
+        </transition>
       </article>
-    </section>
   </section>
 </template>
 
 <style scoped>
+/* ─── Page shell ─── */
 .applicant-applications-page {
   display: grid;
   gap: 1.25rem;
@@ -353,88 +496,30 @@ const requestDeleteSelectedApplications = () => {
   min-height: calc(100vh - 8rem);
 }
 
-.applicant-applications-page__grid {
-  display: grid;
-  grid-template-columns: minmax(17rem, 19rem) minmax(0, 1fr);
-  gap: 1.25rem;
-  align-items: start;
-  width: 100%;
-  min-height: 100%;
-}
-
-.applicant-applications-page__rail {
-  display: grid;
-  gap: 1rem;
-  position: sticky;
-  top: 6rem;
-}
-
-.applicant-applications-page__profile-card,
+/* ─── Main panel ─── */
 .applicant-applications-page__panel {
+  margin-top: 20px;
   display: grid;
   align-content: start;
   gap: 1.1rem;
-  padding: 1.25rem;
-  border: 1px solid rgba(129, 169, 143, 0.18);
-  border-radius: 1.35rem;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(244, 251, 247, 0.95) 100%);
-  box-shadow:
-    0 20px 40px rgba(79, 129, 102, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.92);
-}
-
-.applicant-applications-page__profile-card {
-  align-content: start;
-  min-height: auto;
-  background:
-    radial-gradient(circle at top right, rgba(208, 241, 221, 0.62), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(245, 251, 247, 0.98) 100%);
-}
-
-.applicant-applications-page__panel {
+  padding: 2rem;
+  border: 1px solid rgba(166, 184, 173, 0.52);
+  border-radius: 1.25rem;
   min-height: clamp(34rem, calc(100vh - 10rem), 46rem);
   background:
-    radial-gradient(circle at top right, rgba(228, 243, 233, 0.78), transparent 26%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(245, 251, 247, 0.95) 100%);
-}
-
-.applicant-applications-page__profile-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.85rem;
-}
-
-.applicant-applications-page__profile-badge,
-.applicant-applications-page__profile-status {
-  display: inline-flex;
-  align-items: center;
-  min-height: 2rem;
-  border: 1px solid rgba(190, 206, 197, 0.95);
-  border-radius: 999px;
-  padding: 0 0.82rem;
-  font-size: 0.7rem;
-  font-weight: 800;
-  line-height: 1.2;
+    radial-gradient(ellipse at top left, rgba(236, 248, 241, 0.42), transparent 52%),
+    linear-gradient(180deg, #ffffff 0%, #fafcfb 100%);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.78),
-    0 8px 16px rgba(15, 23, 42, 0.04);
+    0 1px 0 rgba(255, 255, 255, 0.8),
+    0 20px 48px rgba(15, 23, 42, 0.05),
+    0 4px 12px rgba(15, 23, 42, 0.03);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
-.applicant-applications-page__profile-badge {
-  color: #45574f;
-  background: #f8fbf8;
-}
-
-.applicant-applications-page__profile-status {
-  color: #1d6b3a;
-  background: #eef8f1;
-}
-
-.applicant-applications-page__identity,
-.applicant-applications-page__identity h2,
-.applicant-applications-page__identity p,
+/* ─── Reset margins ─── */
+.applicant-applications-page__summary-copy,
+.applicant-applications-page__summary-copy h2,
+.applicant-applications-page__summary-copy p,
 .applicant-applications-page__eyebrow,
 .applicant-applications-page__card h4,
 .applicant-applications-page__card p,
@@ -445,89 +530,14 @@ const requestDeleteSelectedApplications = () => {
   margin: 0;
 }
 
-.applicant-applications-page__eyebrow {
-  color: #6c8376;
-  font-size: 0.69rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.applicant-applications-page__identity h2 {
-  margin-top: 0.28rem;
-  color: #16271f;
-  font-size: clamp(1.45rem, 2vw, 1.75rem);
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  line-height: 1.05;
-}
-
-.applicant-applications-page__identity p {
-  margin-top: 0.35rem;
-  color: #5f7268;
-  font-size: 0.86rem;
-  line-height: 1.65;
-}
-
-.applicant-applications-page__mini-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.85rem;
-}
-
-.applicant-applications-page__mini-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.8rem;
-  align-items: start;
-  min-height: 5.4rem;
-  padding: 0.95rem 1rem;
-  border: 1px solid rgba(193, 206, 214, 0.92);
-  border-radius: 1.05rem;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow:
-    0 1px 0 rgba(15, 23, 42, 0.03),
-    0 14px 26px rgba(15, 23, 42, 0.05);
-}
-
-.applicant-applications-page__mini-item span {
-  color: #6c7c75;
-  font-size: 0.73rem;
-  font-weight: 700;
-  line-height: 1.45;
-}
-
-.applicant-applications-page__mini-item strong {
-  color: #16271f;
-  font-size: 1rem;
-  font-weight: 800;
-  text-align: right;
-  line-height: 1.35;
-  word-break: break-word;
-}
-
-.applicant-applications-page__mini-item--outcome {
-  grid-template-columns: 1fr;
-}
-
-.applicant-applications-page__mini-item--outcome strong {
-  text-align: left;
-  font-size: 0.94rem;
-}
-
-.applicant-applications-page__list {
-  display: grid;
-  gap: 1.1rem;
-  padding-top: 0.1rem;
-}
-
+/* ─── Panel head ─── */
 .applicant-panel__head--applications {
   align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
   margin-bottom: 0;
-  padding: 0.1rem 0 1rem;
-  border-bottom: 1px solid rgba(208, 219, 213, 0.9);
+  padding: 0.1rem 0 1.15rem;
+  border-bottom: 1px solid rgba(208, 219, 213, 0.72);
 }
 
 .applicant-panel__head--applications > div:first-child {
@@ -537,9 +547,9 @@ const requestDeleteSelectedApplications = () => {
 
 .applicant-panel__head--applications h3 {
   color: #183126;
-  font-size: 1.08rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
 }
 
 .applicant-panel__head--applications span {
@@ -548,6 +558,7 @@ const requestDeleteSelectedApplications = () => {
   font-weight: 600;
 }
 
+/* ─── Head actions ─── */
 .applicant-applications-page__head-actions {
   display: flex;
   flex-wrap: wrap;
@@ -563,6 +574,7 @@ const requestDeleteSelectedApplications = () => {
   font-weight: 700;
   display: inline-flex;
   align-items: center;
+  gap: 0.45rem;
   min-height: 2.2rem;
   padding: 0 0.95rem;
   border: 1px solid rgba(196, 208, 214, 0.88);
@@ -570,6 +582,41 @@ const requestDeleteSelectedApplications = () => {
   background: rgba(255, 255, 255, 0.92);
 }
 
+.applicant-applications-page__head-count i {
+  font-size: 0.88rem;
+  color: #2f7d54;
+}
+
+.applicant-applications-page__select-button,
+.applicant-applications-page__secondary-button,
+.applicant-applications-page__delete-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.15rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.applicant-applications-page__select-button {
+  padding: 0.5rem 1rem;
+  border: 1px solid rgba(191, 219, 203, 0.92);
+  border-radius: 999px;
+  background: rgba(240, 253, 244, 0.98);
+  color: #1f6b45;
+}
+
+.applicant-applications-page__select-button:hover {
+  background: rgba(220, 252, 231, 0.98);
+  border-color: rgba(52, 211, 153, 0.72);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(27, 138, 84, 0.12);
+}
+
+/* ─── Bulk actions ─── */
 .applicant-applications-page__bulk-actions {
   display: flex;
   flex-wrap: wrap;
@@ -578,7 +625,7 @@ const requestDeleteSelectedApplications = () => {
   justify-content: flex-end;
   padding: 0.18rem;
   border: 1px solid rgba(205, 216, 226, 0.88);
-  border-radius: 999px;
+  border-radius: 0.85rem;
   background: rgba(250, 252, 251, 0.96);
 }
 
@@ -589,7 +636,7 @@ const requestDeleteSelectedApplications = () => {
   gap: 0.55rem;
   color: #355646;
   font-size: 0.76rem;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .applicant-applications-page__bulk-toggle {
@@ -598,8 +645,8 @@ const requestDeleteSelectedApplications = () => {
 
 .applicant-applications-page__bulk-toggle input,
 .applicant-applications-page__card-checkbox input {
-  width: 1rem;
-  height: 1rem;
+  width: 1.05rem;
+  height: 1.05rem;
   margin: 0;
   accent-color: #1b8a54;
   cursor: pointer;
@@ -616,54 +663,237 @@ const requestDeleteSelectedApplications = () => {
   min-height: 2.15rem;
   padding: 0.35rem 0.82rem;
   border: 1px solid rgba(196, 208, 214, 0.92);
-  border-radius: 999px;
+  border-radius: 0.6rem;
   background: rgba(255, 255, 255, 0.92);
   color: #355646;
   font-size: 0.74rem;
-  font-weight: 800;
+  font-weight: 600;
+}
+
+.applicant-applications-page__secondary-button {
+  padding: 0.5rem 0.95rem;
+  border: 1px solid rgba(205, 216, 226, 0.95);
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.96);
+  color: #355646;
+}
+
+.applicant-applications-page__secondary-button:hover {
+  background: rgba(248, 250, 249, 0.98);
+  border-color: rgba(148, 163, 184, 0.7);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
 }
 
 .applicant-applications-page__delete-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-height: 2.15rem;
   padding: 0.5rem 0.95rem;
   border: 1px solid rgba(240, 199, 199, 0.95);
-  border-radius: 999px;
+  border-radius: 0.7rem;
   background: rgba(254, 242, 242, 0.96);
   color: #b42318;
-  font-size: 0.76rem;
-  font-weight: 800;
-  cursor: pointer;
-  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
 
 .applicant-applications-page__delete-button:hover {
   background: rgba(254, 226, 226, 0.96);
   border-color: rgba(229, 137, 137, 0.95);
   transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(180, 35, 24, 0.12);
 }
 
+.applicant-applications-page__select-button:disabled,
+.applicant-applications-page__secondary-button:disabled,
 .applicant-applications-page__delete-button:disabled {
   opacity: 0.56;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
-.applicant-applications-page__card {
+.applicant-applications-page__modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
   display: grid;
-  gap: 1rem;
-  padding: 1.15rem 1.2rem;
-  border: 1px solid rgba(193, 206, 214, 0.92);
+  place-items: center;
+  padding: 1.25rem;
+  background: rgba(15, 23, 42, 0.34);
+  backdrop-filter: blur(6px);
+}
+
+.applicant-applications-page__modal-card {
+  width: min(100%, 25rem);
+  display: grid;
+  gap: 0.85rem;
+  padding: 1.4rem;
+  border: 1px solid rgba(223, 229, 236, 0.96);
   border-radius: 1.2rem;
-  background: #ffffff;
+  background: linear-gradient(180deg, #ffffff 0%, #fafcfb 100%);
   box-shadow:
-    0 1px 0 rgba(15, 23, 42, 0.03),
-    0 18px 32px rgba(15, 23, 42, 0.06);
+    0 24px 50px rgba(15, 23, 42, 0.18),
+    0 6px 18px rgba(15, 23, 42, 0.08);
+}
+
+.applicant-applications-page__modal-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 1rem;
+  background: rgba(254, 242, 242, 0.96);
+  color: #b42318;
+  font-size: 1.25rem;
+}
+
+.applicant-applications-page__modal-eyebrow,
+.applicant-applications-page__modal-copy,
+.applicant-applications-page__modal-card h3 {
+  margin: 0;
+}
+
+.applicant-applications-page__modal-eyebrow {
+  color: #b42318;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.applicant-applications-page__modal-card h3 {
+  color: #16271f;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.applicant-applications-page__modal-copy {
+  color: #60746a;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.applicant-applications-page__modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+}
+
+.applicant-applications-page__modal-button {
+  min-width: 6.5rem;
+  min-height: 2.4rem;
+  padding: 0.55rem 1rem;
+  border-radius: 0.8rem;
+  border: 1px solid transparent;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.applicant-applications-page__modal-button--ghost {
+  border-color: rgba(205, 216, 226, 0.95);
+  background: rgba(255, 255, 255, 0.96);
+  color: #355646;
+}
+
+.applicant-applications-page__modal-button--ghost:hover {
+  background: rgba(248, 250, 249, 0.98);
+  border-color: rgba(148, 163, 184, 0.7);
+  transform: translateY(-1px);
+}
+
+.applicant-applications-page__modal-button--danger {
+  border-color: rgba(240, 199, 199, 0.95);
+  background: rgba(254, 242, 242, 0.96);
+  color: #b42318;
+  box-shadow: 0 8px 18px rgba(180, 35, 24, 0.12);
+}
+
+.applicant-applications-page__modal-button--danger:hover {
+  background: rgba(254, 226, 226, 0.96);
+  border-color: rgba(229, 137, 137, 0.95);
+  transform: translateY(-1px);
+}
+
+.applicant-applications-page__modal-button:disabled {
+  opacity: 0.56;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.applicant-applications-page__modal-enter-active,
+.applicant-applications-page__modal-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.applicant-applications-page__modal-enter-active .applicant-applications-page__modal-card,
+.applicant-applications-page__modal-leave-active .applicant-applications-page__modal-card {
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.applicant-applications-page__modal-enter-from,
+.applicant-applications-page__modal-leave-to {
+  opacity: 0;
+}
+
+.applicant-applications-page__modal-enter-from .applicant-applications-page__modal-card,
+.applicant-applications-page__modal-leave-to .applicant-applications-page__modal-card {
+  opacity: 0;
+  transform: translateY(0.5rem) scale(0.98);
+}
+
+/* ─── Card list ─── */
+.applicant-applications-page__list {
+  display: grid;
+  gap: 1.25rem;
+  padding-top: 0.1rem;
+}
+
+/* ─── Card ─── */
+.applicant-applications-page__card {
+  position: relative;
+  display: grid;
+  gap: 0;
+  border: 1px solid rgba(193, 206, 214, 0.72);
+  border-radius: 1.1rem;
+  background: #ffffff;
+  overflow: hidden;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.03),
+    0 8px 24px rgba(15, 23, 42, 0.04);
+  transition:
+    transform 0.26s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.22s ease,
+    box-shadow 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: applicant-card-entrance 0.42s cubic-bezier(0.22, 1, 0.36, 1) var(--card-enter-delay, 0ms) both;
+}
+
+@keyframes applicant-card-entrance {
+  from {
+    opacity: 0;
+    transform: translateY(1rem) scale(0.98);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.applicant-applications-page__card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(47, 125, 84, 0.32);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.03),
+    0 20px 40px rgba(15, 23, 42, 0.07),
+    0 8px 16px rgba(47, 125, 84, 0.05);
 }
 
 .applicant-applications-page__card--inactive {
-  border-color: rgba(203, 213, 225, 0.7);
+  border-color: rgba(203, 213, 225, 0.55);
   background: linear-gradient(180deg, #fbfcfb 0%, #f7f9f8 100%);
 }
 
@@ -672,42 +902,216 @@ const requestDeleteSelectedApplications = () => {
   filter: saturate(0.72);
 }
 
-.applicant-applications-page__card-top {
+/* ─── Card accent bar ─── */
+.applicant-applications-page__card-accent {
+  height: 0.3rem;
+  background: linear-gradient(90deg, #1b8a54 0%, #34d399 40%, #6ee7b7 70%, #a7f3d0 100%);
+  border-radius: 1.1rem 1.1rem 0 0;
+}
+
+.applicant-applications-page__card--inactive .applicant-applications-page__card-accent {
+  background: linear-gradient(90deg, #94a3b8 0%, #cbd5e1 100%);
+}
+
+/* ─── Card header ─── */
+.applicant-applications-page__card-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1.1rem;
+  padding: 1.25rem 1.35rem 0.85rem;
 }
 
+.applicant-applications-page__card-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.95rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.applicant-applications-page__card-avatar {
+  flex-shrink: 0;
+  width: 3.2rem;
+  height: 3.2rem;
+  border-radius: 0.85rem;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #1b8a54 0%, #34d399 100%);
+  color: #ffffff;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  box-shadow:
+    0 4px 12px rgba(27, 138, 84, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.applicant-applications-page__card--inactive .applicant-applications-page__card-avatar {
+  background: linear-gradient(135deg, #94a3b8 0%, #cbd5e1 100%);
+  box-shadow: 0 4px 12px rgba(148, 163, 184, 0.18);
+}
+
+.applicant-applications-page__card-identity {
+  min-width: 0;
+}
+
+.applicant-applications-page__card-identity h4 {
+  color: #0f1f18;
+  font-size: 1.18rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+}
+
+.applicant-applications-page__card-company {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.28rem;
+  color: #4b6358;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.applicant-applications-page__card-company i {
+  font-size: 0.78rem;
+  color: #7b9488;
+}
+
+/* ─── Card actions ─── */
 .applicant-applications-page__card-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 0.8rem;
   flex-wrap: wrap;
+  flex-shrink: 0;
 }
 
-.applicant-applications-page__card h4 {
-  color: #16271f;
-  font-size: 1.08rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+.applicant-applications-page__card-checkbox {
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.6rem;
+  background: rgba(248, 250, 249, 0.96);
+  border: 1px solid rgba(214, 222, 230, 0.6);
+  transition: border-color 0.18s ease, background 0.18s ease;
 }
 
-.applicant-applications-page__card p {
-  margin-top: 0.3rem;
-  color: #63756d;
-  font-size: 0.82rem;
-  line-height: 1.45;
+.applicant-applications-page__card-checkbox:hover {
+  border-color: rgba(47, 125, 84, 0.28);
+  background: rgba(236, 253, 245, 0.6);
+}
+
+/* ─── Status pill icon ─── */
+.applicant-status-pill__icon {
+  font-size: 0.72rem;
+  margin-right: 0.15rem;
+}
+
+/* ─── Meta bar ─── */
+.applicant-applications-page__meta-bar {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.7rem 1.35rem 0.9rem;
+  border-top: 1px solid rgba(229, 237, 233, 0.65);
+  border-bottom: 1px solid rgba(229, 237, 233, 0.65);
+  background:
+    linear-gradient(180deg, rgba(248, 252, 250, 0.96) 0%, rgba(243, 249, 246, 0.88) 100%);
 }
 
 .applicant-applications-page__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.7rem;
+  gap: 0.6rem;
   padding-top: 0.1rem;
 }
 
+.applicant-applications-page__meta-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.applicant-applications-page__meta-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  color: #6c8376;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.applicant-applications-page__meta-tag i {
+  font-size: 0.82rem;
+  color: #8da898;
+}
+
+.applicant-applications-page__meta-divider {
+  width: 1px;
+  height: 0.9rem;
+  background: rgba(166, 184, 173, 0.45);
+  border-radius: 999px;
+}
+
+/* ─── Meta pills (redesigned) ─── */
+.applicant-applications-page__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 2rem;
+  padding: 0.38rem 0.78rem;
+  border: 1px solid rgba(213, 221, 216, 0.75);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #355646;
+  font-size: 0.74rem;
+  font-weight: 700;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.applicant-applications-page__pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.06);
+}
+
+.applicant-applications-page__pill i {
+  font-size: 0.82rem;
+}
+
+.applicant-applications-page__pill--location {
+  background: rgba(237, 242, 255, 0.88);
+  border-color: rgba(191, 219, 254, 0.72);
+  color: #1d4ed8;
+}
+
+.applicant-applications-page__pill--location i { color: #3b82f6; }
+
+.applicant-applications-page__pill--type {
+  background: rgba(245, 243, 255, 0.88);
+  border-color: rgba(199, 210, 254, 0.72);
+  color: #4338ca;
+}
+
+.applicant-applications-page__pill--type i { color: #6366f1; }
+
+.applicant-applications-page__pill--salary {
+  background: rgba(255, 251, 235, 0.88);
+  border-color: rgba(253, 230, 138, 0.72);
+  color: #92400e;
+}
+
+.applicant-applications-page__pill--salary i { color: #f59e0b; }
+
+.applicant-applications-page__pill--pwd {
+  background: rgba(236, 253, 245, 0.88);
+  border-color: rgba(167, 243, 208, 0.72);
+  color: #047857;
+}
+
+.applicant-applications-page__pill--pwd i { color: #10b981; }
+
+/* ─── Status copy ─── */
 .applicant-applications-page__status-copy,
 .applicant-applications-page__status-note {
   margin: 0;
@@ -716,13 +1120,23 @@ const requestDeleteSelectedApplications = () => {
 .applicant-applications-page__status-copy {
   display: grid;
   gap: 0.35rem;
-  padding-top: 0.1rem;
+  padding: 0.8rem 1.35rem;
 }
 
 .applicant-applications-page__status-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
   color: #4c5f55;
-  font-size: 0.8rem;
-  line-height: 1.6;
+  font-size: 0.82rem;
+  line-height: 1.65;
+}
+
+.applicant-applications-page__status-note i {
+  flex-shrink: 0;
+  font-size: 0.88rem;
+  margin-top: 0.16rem;
+  color: #7b9488;
 }
 
 .applicant-applications-page__status-note--danger {
@@ -730,13 +1144,22 @@ const requestDeleteSelectedApplications = () => {
   font-weight: 700;
 }
 
+.applicant-applications-page__status-note--danger i {
+  color: #dc2626;
+}
+
 .applicant-applications-page__status-note--discontinued {
-  padding: 0.8rem 0.9rem;
-  border: 1px solid rgba(244, 114, 114, 0.28);
-  border-radius: 0.95rem;
-  background: rgba(254, 242, 242, 0.88);
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(244, 114, 114, 0.22);
+  border-radius: 0.85rem;
+  background:
+    linear-gradient(135deg, rgba(254, 242, 242, 0.92), rgba(254, 226, 226, 0.6));
   color: #991b1b;
   font-weight: 700;
+}
+
+.applicant-applications-page__status-note--discontinued i {
+  color: #dc2626;
 }
 
 .applicant-applications-page__status-note--muted {
@@ -744,71 +1167,20 @@ const requestDeleteSelectedApplications = () => {
   font-size: 0.74rem;
 }
 
-.applicant-applications-page__pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.42rem;
-  min-height: 2.15rem;
-  padding: 0.46rem 0.84rem;
-  border: 1px solid rgba(213, 221, 216, 0.95);
-  border-radius: 999px;
-  background: #f9fbfa;
-  color: #355646;
-  font-size: 0.75rem;
-  font-weight: 700;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
-}
-
-.applicant-applications-page__pill--location {
-  background: rgba(237, 242, 255, 0.96);
-  border-color: rgba(191, 219, 254, 0.95);
-  color: #1d4ed8;
-}
-
-.applicant-applications-page__pill--type {
-  background: rgba(244, 247, 255, 0.98);
-  border-color: rgba(199, 210, 254, 0.95);
-  color: #4338ca;
-}
-
-.applicant-applications-page__pill--salary {
-  background: rgba(255, 247, 237, 0.98);
-  border-color: rgba(253, 230, 138, 0.95);
-  color: #b45309;
-}
-
-.applicant-applications-page__pill--pwd {
-  background: rgba(236, 253, 245, 0.98);
-  border-color: rgba(167, 243, 208, 0.95);
-  color: #047857;
-}
-
-.applicant-applications-page__pill--date {
-  background: rgba(255, 247, 237, 0.98);
-  border-color: rgba(253, 230, 138, 0.95);
-  color: #b45309;
-}
-
-.applicant-applications-page__pill--source {
-  background: rgba(236, 253, 245, 0.98);
-  border-color: rgba(167, 243, 208, 0.95);
-  color: #047857;
-}
-
+/* ─── Timeline (unchanged — user said it's good) ─── */
 .applicant-applications-page__timeline {
   display: grid;
-  gap: 0.9rem;
-  padding: 1rem 1.05rem;
-  border: 1px solid rgba(198, 211, 217, 0.9);
+  gap: 1rem;
+  margin: 0 1.35rem;
+  padding: 1.15rem 1.25rem 1.25rem;
+  border: 1px solid rgba(198, 211, 217, 0.72);
   border-radius: 1.05rem;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 251, 249, 0.94) 100%);
-}
-
-.applicant-applications-page__card-checkbox {
-  padding: 0.25rem 0.35rem;
-  border-radius: 999px;
-  background: rgba(248, 250, 249, 0.96);
+    radial-gradient(circle at top center, rgba(237, 247, 241, 0.68), transparent 52%),
+    linear-gradient(180deg, #fbfdfc 0%, #f5faf7 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 2px 6px rgba(15, 23, 42, 0.03);
 }
 
 .applicant-applications-page__timeline-head {
@@ -817,9 +1189,17 @@ const requestDeleteSelectedApplications = () => {
 }
 
 .applicant-applications-page__timeline-head h5 {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
   color: #1f3028;
-  font-size: 0.88rem;
-  font-weight: 800;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.applicant-applications-page__timeline-head h5 i {
+  font-size: 1rem;
+  color: #2f7d54;
 }
 
 .applicant-applications-page__timeline-head span {
@@ -828,102 +1208,314 @@ const requestDeleteSelectedApplications = () => {
 }
 
 .applicant-applications-page__timeline-list {
-  display: grid;
-  gap: 0.2rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 0.15rem 0 0.35rem;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+}
+
+.applicant-applications-page__timeline-list::-webkit-scrollbar {
+  display: none;
 }
 
 .applicant-applications-page__timeline-item {
+  position: relative;
+  flex: 1 0 0;
+  min-width: 8.8rem;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.9rem;
-  align-items: start;
+  gap: 0.72rem;
+  justify-items: center;
+  text-align: center;
+  padding: 0.12rem 0.4rem 0;
+  transition: transform 0.24s ease, opacity 0.24s ease;
+  scroll-snap-align: start;
+}
+
+.applicant-applications-page__timeline-item--active .applicant-applications-page__timeline-copy {
+  transform: translateY(-0.08rem);
+}
+
+.applicant-applications-page__timeline-item--complete .applicant-applications-page__timeline-copy {
+  opacity: 0.96;
+}
+
+.applicant-applications-page__timeline-item--failed .applicant-applications-page__timeline-copy {
+  opacity: 0.96;
 }
 
 .applicant-applications-page__timeline-marker {
   position: relative;
-  width: 1rem;
-  min-height: 3rem;
+  width: 100%;
+  min-height: 4.4rem;
   display: grid;
   justify-items: center;
+  align-content: start;
 }
 
 .applicant-applications-page__timeline-dot {
   position: relative;
-  z-index: 1;
-  width: 0.78rem;
-  height: 0.78rem;
-  margin-top: 0.2rem;
+  z-index: 2;
+  width: 3.35rem;
+  height: 3.35rem;
+  margin-top: 0;
   border-radius: 999px;
-  background: #f59e0b;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--applicant-timeline-accent, #2f7d54);
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.92) 38%, color-mix(in srgb, var(--applicant-timeline-accent, #2f7d54) 14%, white) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 14px 24px rgba(15, 23, 42, 0.08);
+  transition:
+    border-color 0.24s ease,
+    background-color 0.24s ease,
+    color 0.24s ease,
+    box-shadow 0.24s ease,
+    transform 0.24s ease;
+}
+
+.applicant-applications-page__timeline-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0.42rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0) 100%);
+  opacity: 0.72;
+  transition: opacity 0.24s ease, transform 0.24s ease;
+}
+
+.applicant-applications-page__timeline-dot i {
+  position: relative;
+  z-index: 1;
+  font-size: 1.3rem;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .applicant-applications-page__timeline-dot--warning {
-  background: #f59e0b;
+  --applicant-timeline-accent: #f59e0b;
+  --applicant-timeline-track: rgba(245, 158, 11, 0.18);
 }
 
 .applicant-applications-page__timeline-dot--success {
-  background: #16a34a;
+  --applicant-timeline-accent: #16a34a;
+  --applicant-timeline-track: rgba(22, 163, 74, 0.18);
 }
 
 .applicant-applications-page__timeline-dot--danger {
-  background: #dc2626;
+  --applicant-timeline-accent: #dc2626;
+  --applicant-timeline-track: rgba(220, 38, 38, 0.16);
 }
 
 .applicant-applications-page__timeline-dot--info {
-  background: #f59e0b;
+  --applicant-timeline-accent: #0f766e;
+  --applicant-timeline-track: rgba(15, 118, 110, 0.18);
 }
 
 .applicant-applications-page__timeline-dot--muted {
-  background: #94a3b8;
+  --applicant-timeline-accent: #94a3b8;
+  --applicant-timeline-track: rgba(148, 163, 184, 0.16);
+}
+
+.applicant-applications-page__timeline-dot--complete,
+.applicant-applications-page__timeline-dot--failed {
+  color: var(--applicant-timeline-accent, #16a34a);
+}
+
+.applicant-applications-page__timeline-dot--complete {
+  border-color: var(--applicant-timeline-accent, #16a34a);
+}
+
+.applicant-applications-page__timeline-dot--failed {
+  border-color: var(--applicant-timeline-accent, #dc2626);
+}
+
+.applicant-applications-page__timeline-dot--active {
+  color: var(--applicant-timeline-accent, #2f7d54);
+  transform: translateY(-0.06rem) scale(1.02);
+  box-shadow:
+    0 0 0 0.28rem color-mix(in srgb, var(--applicant-timeline-accent, #2f7d54) 14%, transparent),
+    0 12px 22px rgba(15, 23, 42, 0.09);
+}
+
+.applicant-applications-page__timeline-dot--pending {
+  border-color: rgba(198, 211, 217, 0.96);
+  color: #8a9a91;
+  box-shadow: none;
+}
+
+.applicant-applications-page__timeline-dot--pending::after {
+  opacity: 0.5;
+}
+
+.applicant-applications-page__timeline-badge {
+  position: absolute;
+  top: -0.02rem;
+  left: calc(50% + 1.08rem);
+  z-index: 3;
+  width: 1.08rem;
+  height: 1.08rem;
+  display: grid;
+  place-items: center;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #dbe5df;
+  color: #ffffff;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.08);
+  transform: translateX(-50%);
+}
+
+.applicant-applications-page__timeline-badge i {
+  font-size: 0.58rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.applicant-applications-page__timeline-badge--success { background: #16a34a; }
+.applicant-applications-page__timeline-badge--danger { background: #dc2626; }
+.applicant-applications-page__timeline-badge--warning { background: #f59e0b; }
+.applicant-applications-page__timeline-badge--info { background: #0f766e; }
+.applicant-applications-page__timeline-badge--muted { background: #94a3b8; }
+.applicant-applications-page__timeline-badge--pending { background: #cbd5e1; }
+
+.applicant-applications-page__timeline-badge--active {
+  animation: applicant-applications-page-timeline-pulse 1.6s ease-in-out infinite;
 }
 
 .applicant-applications-page__timeline-line {
   position: absolute;
-  top: 1.18rem;
-  bottom: 0;
-  width: 2px;
-  background: rgba(245, 158, 11, 0.28);
+  top: 1.54rem;
+  left: calc(50% + 1.7rem);
+  width: calc(100% - 3.4rem);
+  height: 0.22rem;
+  border-radius: 999px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--applicant-timeline-track, rgba(148, 163, 184, 0.22)) 0 0.42rem,
+    transparent 0.42rem 0.8rem
+  );
+  overflow: hidden;
 }
 
-.applicant-applications-page__timeline-line--warning,
-.applicant-applications-page__timeline-line--info {
-  background: rgba(245, 158, 11, 0.28);
+.applicant-applications-page__timeline-line::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--applicant-timeline-accent, #2f7d54) 0 0.42rem,
+    transparent 0.42rem 0.8rem
+  );
+  transform-origin: left;
+  transform: scaleX(var(--applicant-timeline-fill-scale, 0));
+  transition: transform 0.3s ease, background-color 0.24s ease;
+}
+
+.applicant-applications-page__timeline-line--warning {
+  --applicant-timeline-accent: #f59e0b;
+  --applicant-timeline-track: rgba(245, 158, 11, 0.18);
 }
 
 .applicant-applications-page__timeline-line--success {
-  background: rgba(22, 163, 74, 0.28);
+  --applicant-timeline-accent: #16a34a;
+  --applicant-timeline-track: rgba(22, 163, 74, 0.18);
 }
 
 .applicant-applications-page__timeline-line--danger {
-  background: rgba(220, 38, 38, 0.2);
+  --applicant-timeline-accent: #dc2626;
+  --applicant-timeline-track: rgba(220, 38, 38, 0.16);
+}
+
+.applicant-applications-page__timeline-line--info {
+  --applicant-timeline-accent: #0f766e;
+  --applicant-timeline-track: rgba(15, 118, 110, 0.18);
 }
 
 .applicant-applications-page__timeline-line--muted {
-  background: rgba(148, 163, 184, 0.28);
+  --applicant-timeline-accent: #94a3b8;
+  --applicant-timeline-track: rgba(148, 163, 184, 0.16);
+}
+
+.applicant-applications-page__timeline-line--filled {
+  --applicant-timeline-fill-scale: 1;
+}
+
+.applicant-applications-page__timeline-line--partial {
+  --applicant-timeline-fill-scale: 0.56;
+}
+
+.applicant-applications-page__timeline-line--empty {
+  --applicant-timeline-fill-scale: 0;
 }
 
 .applicant-applications-page__timeline-copy {
   display: grid;
-  gap: 0.18rem;
-  padding-bottom: 0.65rem;
+  gap: 0.24rem;
+  justify-items: center;
+  padding: 0;
+  transition: transform 0.24s ease, opacity 0.24s ease;
 }
 
 .applicant-applications-page__timeline-copy strong {
-  color: #16271f;
+  color: #1d2b24;
   font-size: 0.84rem;
-  font-weight: 800;
+  font-weight: 700;
+  line-height: 1.2;
 }
 
 .applicant-applications-page__timeline-copy span {
   color: #66786f;
-  font-size: 0.75rem;
-  line-height: 1.5;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  max-width: 11rem;
 }
 
-.applicant-applications-page__panel {
-  grid-template-rows: auto minmax(0, 1fr);
+.applicant-applications-page__timeline-item--complete .applicant-applications-page__timeline-copy strong {
+  color: #146c43;
 }
 
+.applicant-applications-page__timeline-item--active .applicant-applications-page__timeline-copy strong {
+  color: #0f766e;
+}
+
+.applicant-applications-page__timeline-item--failed .applicant-applications-page__timeline-copy strong {
+  color: #b91c1c;
+}
+
+@keyframes applicant-applications-page-timeline-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(15, 118, 110, 0.28); }
+  70% { box-shadow: 0 0 0 0.34rem rgba(15, 118, 110, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(15, 118, 110, 0); }
+}
+
+/* ─── Card footer ─── */
+.applicant-applications-page__card-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem 1.35rem 1rem;
+}
+
+.applicant-applications-page__footer-updated {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #7b8a83;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.applicant-applications-page__footer-updated i {
+  font-size: 0.82rem;
+  color: #9caba2;
+}
+
+/* ─── Empty state ─── */
 .applicant-applications-page__empty-shell {
   display: grid;
   min-height: 100%;
@@ -932,34 +1524,31 @@ const requestDeleteSelectedApplications = () => {
 .applicant-applications-page__empty {
   min-height: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(17rem, 22rem);
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.15rem;
   align-items: stretch;
-  padding: 1.35rem;
-  border: 1px dashed rgba(179, 203, 188, 0.98);
+  padding: 1.5rem;
+  border: 1px dashed rgba(179, 203, 188, 0.82);
   border-radius: 1.3rem;
   background:
-    radial-gradient(circle at top left, rgba(233, 247, 238, 0.92), transparent 32%),
+    radial-gradient(circle at top left, rgba(233, 247, 238, 0.82), transparent 32%),
     linear-gradient(180deg, rgba(253, 255, 253, 0.98) 0%, rgba(244, 250, 246, 0.96) 100%);
   color: #62706a;
 }
 
-.applicant-applications-page__empty-hero,
-.applicant-applications-page__empty-highlights {
+.applicant-applications-page__empty-hero {
   display: grid;
   align-content: center;
-}
-
-.applicant-applications-page__empty-hero {
   gap: 0.85rem;
   padding: 0.8rem 0.4rem;
+  max-width: 42rem;
 }
 
 .applicant-applications-page__empty-icon {
   display: inline-grid;
   place-items: center;
-  width: 4.2rem;
-  height: 4.2rem;
+  width: 4.5rem;
+  height: 4.5rem;
   border-radius: 1.35rem;
   background: linear-gradient(135deg, rgba(28, 138, 84, 0.15), rgba(95, 186, 128, 0.08));
   color: #1b8a54;
@@ -969,14 +1558,14 @@ const requestDeleteSelectedApplications = () => {
 }
 
 .applicant-applications-page__empty-icon i {
-  font-size: 2rem;
+  font-size: 2.1rem;
 }
 
 .applicant-applications-page__empty-overline {
   margin: 0;
   color: #6c8376;
   font-size: 0.72rem;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -989,7 +1578,7 @@ const requestDeleteSelectedApplications = () => {
 .applicant-applications-page__empty h3 {
   color: #183126;
   font-size: clamp(1.5rem, 2vw, 1.9rem);
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.03em;
 }
 
@@ -1010,6 +1599,7 @@ const requestDeleteSelectedApplications = () => {
 .applicant-applications-page__empty-tags span {
   display: inline-flex;
   align-items: center;
+  gap: 0.4rem;
   min-height: 2.1rem;
   padding: 0.4rem 0.82rem;
   border: 1px solid rgba(201, 215, 206, 0.95);
@@ -1020,66 +1610,13 @@ const requestDeleteSelectedApplications = () => {
   font-weight: 700;
 }
 
-.applicant-applications-page__empty-highlights {
-  gap: 0.75rem;
-}
-
-.applicant-applications-page__empty-highlight {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.85rem;
-  align-items: start;
-  padding: 0.95rem 1rem;
-  border: 1px solid rgba(199, 212, 204, 0.95);
-  border-radius: 1.05rem;
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow:
-    0 1px 0 rgba(15, 23, 42, 0.02),
-    0 14px 24px rgba(15, 23, 42, 0.04);
-}
-
-.applicant-applications-page__empty-highlight-icon {
-  display: inline-grid;
-  place-items: center;
-  width: 2.35rem;
-  height: 2.35rem;
-  border-radius: 0.9rem;
-  background: rgba(29, 107, 58, 0.1);
-  color: #1d6b3a;
-}
-
-.applicant-applications-page__empty-highlight-icon i {
-  font-size: 1rem;
-}
-
-.applicant-applications-page__empty-highlight-copy {
-  display: grid;
-  gap: 0.3rem;
-}
-
-.applicant-applications-page__empty-highlight-copy strong {
-  color: #193128;
-  font-size: 0.86rem;
-  font-weight: 800;
-}
-
-.applicant-applications-page__empty-highlight-copy p {
-  color: #66796f;
+.applicant-applications-page__empty-tags span i {
+  color: #1b8a54;
   font-size: 0.78rem;
-  line-height: 1.6;
 }
 
+/* ─── Responsive ─── */
 @media (max-width: 1080px) {
-  .applicant-applications-page__grid {
-    grid-template-columns: 1fr;
-  }
-
-  .applicant-applications-page__rail {
-    position: static;
-    top: auto;
-  }
-
-  .applicant-applications-page__profile-card,
   .applicant-applications-page__panel {
     min-height: auto;
   }
@@ -1095,6 +1632,33 @@ const requestDeleteSelectedApplications = () => {
     min-height: auto;
   }
 
+  .applicant-applications-page__panel {
+    padding: 1rem;
+    border-radius: 1rem;
+  }
+
+  .applicant-applications-page__card-header {
+    display: grid;
+    grid-template-columns: 1fr;
+    padding: 1rem 1rem 0.7rem;
+  }
+
+  .applicant-applications-page__meta-bar {
+    padding: 0.6rem 1rem 0.7rem;
+  }
+
+  .applicant-applications-page__status-copy {
+    padding: 0.6rem 1rem;
+  }
+
+  .applicant-applications-page__timeline {
+    margin: 0 1rem;
+  }
+
+  .applicant-applications-page__card-footer {
+    padding: 0.6rem 1rem 0.9rem;
+  }
+
   .applicant-applications-page__head-actions {
     width: 100%;
     justify-content: flex-start;
@@ -1107,26 +1671,24 @@ const requestDeleteSelectedApplications = () => {
     border-radius: 1rem;
   }
 
-  .applicant-applications-page__card-top {
+  .applicant-applications-page__select-button,
+  .applicant-applications-page__secondary-button,
+  .applicant-applications-page__delete-button,
+  .applicant-applications-page__selection-count {
+    width: 100%;
+  }
+
+  .applicant-applications-page__modal-actions {
     display: grid;
     grid-template-columns: 1fr;
   }
 
+  .applicant-applications-page__modal-button {
+    width: 100%;
+  }
+
   .applicant-panel__head--applications {
     align-items: start;
-  }
-
-  .applicant-applications-page__mini-list {
-    grid-template-columns: 1fr;
-  }
-
-  .applicant-applications-page__mini-item {
-    grid-template-columns: 1fr;
-    min-height: auto;
-  }
-
-  .applicant-applications-page__mini-item strong {
-    text-align: left;
   }
 
   .applicant-applications-page__empty {

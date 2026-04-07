@@ -30,27 +30,16 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
-  notificationCount: {
-    type: Number,
-    default: 0,
-  },
 })
 
-const emit = defineEmits(['open-personalization', 'open-help-center', 'open-terms', 'logout', 'open-notification'])
+const emit = defineEmits(['open-personalization', 'open-settings', 'logout', 'open-notification'])
 
 const isDropdownOpen = ref(false)
 const isNotificationOpen = ref(false)
 const profileMenuRef = ref(null)
 const notificationMenuRef = ref(null)
 const APPLICANT_SEEN_NOTIFICATION_STORAGE_KEY = 'applicantSeenNotificationIds'
-const seenNotificationIds = ref([])
-
-const formatNotificationBadge = (value) => {
-  const count = Number(value) || 0
-  return count > 99 ? '99+' : String(count)
-}
-
-const readSeenNotificationIds = () => {
+function readSeenNotificationIds() {
   if (typeof window === 'undefined') return []
 
   try {
@@ -63,6 +52,37 @@ const readSeenNotificationIds = () => {
   catch {
     return []
   }
+}
+const seenNotificationIds = ref(readSeenNotificationIds())
+
+const formatNotificationBadge = (value) => {
+  const count = Number(value) || 0
+  return count > 99 ? '99+' : String(count)
+}
+
+const resolveNotificationTimestamp = (value) => {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return value
+  }
+
+  const parsedValue = Date.parse(String(value || '').trim())
+  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : 0
+}
+
+const formatNotificationSentLabel = (value, fallbackLabel = 'Just now') => {
+  const timestamp = resolveNotificationTimestamp(value)
+  if (!timestamp) {
+    const normalizedFallback = String(fallbackLabel || '').trim() || 'Just now'
+    return `Sent ${normalizedFallback}`
+  }
+
+  return `Sent ${new Date(timestamp).toLocaleString('en-US', {
+    month: 'short',
+    day: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })}`
 }
 
 const persistSeenNotificationIds = () => {
@@ -77,17 +97,60 @@ const persistSeenNotificationIds = () => {
 }
 
 const normalizeNotificationId = (value) => String(value || '').trim()
+const getNotificationSectionLabel = (value) => {
+  const normalizedValue = String(value || '').trim().toLowerCase()
+  if (normalizedValue === 'applications') return 'Applications'
+  if (normalizedValue === 'interviews') return 'Interviews'
+  if (normalizedValue === 'technical-assessment') return 'Technical Assessment'
+  if (normalizedValue === 'settings') return 'Workspace'
+  return 'Updates'
+}
+
+const getNotificationIconClass = (section, tone) => {
+  const normalizedSection = String(section || '').trim().toLowerCase()
+  const normalizedTone = String(tone || '').trim().toLowerCase()
+
+  if (normalizedSection === 'applications') {
+    return normalizedTone === 'danger' ? 'bi bi-x-octagon-fill' : 'bi bi-briefcase-fill'
+  }
+
+  if (normalizedSection === 'interviews') {
+    return normalizedTone === 'danger' ? 'bi bi-calendar-x-fill' : 'bi bi-camera-video-fill'
+  }
+
+  if (normalizedSection === 'technical-assessment') {
+    return normalizedTone === 'danger' ? 'bi bi-exclamation-diamond-fill' : 'bi bi-ui-checks-grid'
+  }
+
+  if (normalizedSection === 'settings') {
+    return 'bi bi-shield-check'
+  }
+
+  return 'bi bi-bell-fill'
+}
 
 const normalizedNotifications = computed(() =>
   (Array.isArray(props.notifications) ? props.notifications : [])
     .map((item) => {
       const notificationId = normalizeNotificationId(item?.id)
+      const timeLabel = String(item?.timeLabel || '').trim() || 'Just now'
+      const createdAtValue = resolveNotificationTimestamp(
+        item?.createdAtValue
+        || item?.createdAt
+        || item?.created_at
+        || item?.timestamp,
+      )
+
       return {
         ...item,
         id: notificationId,
         message: String(item?.message || item?.copy || '').trim(),
-        timeLabel: String(item?.timeLabel || '').trim() || 'Just now',
+        createdAtValue,
+        timeLabel,
+        sentLabel: formatNotificationSentLabel(createdAtValue, timeLabel),
         isUnread: notificationId ? !seenNotificationIds.value.includes(notificationId) : true,
+        sectionLabel: getNotificationSectionLabel(item?.section),
+        iconClass: getNotificationIconClass(item?.section, item?.tone),
       }
     })
     .filter((item) => item.id),
@@ -96,6 +159,37 @@ const normalizedNotifications = computed(() =>
 const unreadNotificationCount = computed(() =>
   normalizedNotifications.value.filter((item) => item.isUnread).length,
 )
+const notificationCount = computed(() => normalizedNotifications.value.length)
+
+const titleSummary = computed(() => {
+  const normalizedTitle = String(props.title || '').trim().toLowerCase()
+
+  if (normalizedTitle.includes('dashboard')) {
+    return 'Your overview for applications, interviews, and fresh updates.'
+  }
+
+  if (normalizedTitle.includes('profile')) {
+    return 'Keep your applicant profile complete and ready for employers.'
+  }
+
+  if (normalizedTitle.includes('application')) {
+    return 'Review each application stage and stay updated in real time.'
+  }
+
+  if (normalizedTitle.includes('interview')) {
+    return 'Manage your interview schedules, confirmations, and follow-ups.'
+  }
+
+  if (normalizedTitle.includes('assessment')) {
+    return 'Track assigned technical tests and your latest submissions.'
+  }
+
+  if (normalizedTitle.includes('job')) {
+    return 'Explore openings that match your profile and current preferences.'
+  }
+
+  return 'Stay organized inside your applicant workspace.'
+})
 
 const markNotificationsAsSeen = (items = normalizedNotifications.value) => {
   const notificationIds = (Array.isArray(items) ? items : [])
@@ -120,10 +214,6 @@ const closeDropdown = () => {
 const toggleNotificationDropdown = () => {
   isDropdownOpen.value = false
   isNotificationOpen.value = !isNotificationOpen.value
-
-  if (isNotificationOpen.value) {
-    markNotificationsAsSeen()
-  }
 }
 
 const closeNotificationDropdown = () => {
@@ -151,7 +241,6 @@ const handleDocumentClick = (event) => {
 }
 
 onMounted(() => {
-  seenNotificationIds.value = readSeenNotificationIds()
   document.addEventListener('click', handleDocumentClick)
 })
 
@@ -159,11 +248,6 @@ onBeforeUnmount(() => {
   document.removeEventListener('click', handleDocumentClick)
 })
 
-watch(() => props.notifications, () => {
-  if (isNotificationOpen.value) {
-    markNotificationsAsSeen()
-  }
-}, { deep: true })
 </script>
 
 <template>
@@ -175,6 +259,12 @@ watch(() => props.notifications, () => {
         </span>
         <i class="bi bi-chevron-right applicant-navbar__breadcrumb-separator" aria-hidden="true" />
         <span class="applicant-navbar__breadcrumb-current">{{ title }}</span>
+      </div>
+
+      <div class="applicant-navbar__title-block">
+        <p class="applicant-navbar__eyebrow">Applicant Workspace</p>
+        <h1 class="applicant-navbar__title">{{ title }}</h1>
+        <p class="applicant-navbar__subtitle">{{ titleSummary }}</p>
       </div>
     </div>
 
@@ -202,14 +292,21 @@ watch(() => props.notifications, () => {
             aria-label="Applicant notifications"
           >
             <div class="applicant-navbar__notification-head">
-              <div>
+              <div class="applicant-navbar__notification-head-copy">
                 <strong>Notifications</strong>
-                <span>Live application activity</span>
+                <span>Recent applicant activity</span>
               </div>
 
-              <span v-if="unreadNotificationCount > 0" class="applicant-navbar__notification-pill">
-                {{ formatNotificationBadge(unreadNotificationCount) }} new
-              </span>
+              <div class="applicant-navbar__notification-head-meta">
+                <span
+                  v-if="notificationCount > 0"
+                  class="applicant-navbar__notification-pill"
+                  :class="{ 'is-muted': unreadNotificationCount === 0 }"
+                >
+                  {{ unreadNotificationCount > 0 ? `${formatNotificationBadge(unreadNotificationCount)} new` : 'All seen' }}
+                </span>
+                <small v-if="notificationCount > 0">{{ notificationCount }} total</small>
+              </div>
             </div>
 
             <div v-if="normalizedNotifications.length" class="applicant-navbar__notification-list">
@@ -217,17 +314,18 @@ watch(() => props.notifications, () => {
                 v-for="item in normalizedNotifications"
                 :key="item.id"
                 class="applicant-navbar__notification-item"
-                :class="{ 'is-unread': item.isUnread }"
+                :class="[{ 'is-unread': item.isUnread }, `is-${item.tone || 'neutral'}`]"
+                :data-icon="item.section === 'applications' ? 'AP' : item.section === 'interviews' ? 'IN' : item.section === 'technical-assessment' ? 'TA' : 'UP'"
                 type="button"
                 role="menuitem"
                 @click="handleNotificationClick(item)"
               >
                 <span class="applicant-navbar__notification-dot" :class="{ 'is-unread': item.isUnread }" aria-hidden="true" />
 
-                <div class="applicant-navbar__notification-copy">
+                <div class="applicant-navbar__notification-copy" :data-meta="`${item.sentLabel} | ${item.timeLabel}`">
                   <strong>{{ item.title }}</strong>
                   <span>{{ item.message }}</span>
-                  <small>{{ item.timeLabel }}</small>
+                  <small>{{ item.sentLabel }} · {{ item.timeLabel }}</small>
                 </div>
               </button>
             </div>
@@ -255,19 +353,12 @@ watch(() => props.notifications, () => {
           <div v-if="isDropdownOpen" class="applicant-navbar__dropdown">
             <div class="applicant-navbar__dropdown-group">
               <button type="button" class="applicant-navbar__dropdown-link" @click="handleMenuAction('open-personalization')">
+                <i class="bi bi-person-circle" aria-hidden="true" />
+                <span>My Profile</span>
+              </button>
+              <button type="button" class="applicant-navbar__dropdown-link" @click="handleMenuAction('open-settings')">
                 <i class="bi bi-sliders2" aria-hidden="true" />
-                <span>Personalization</span>
-              </button>
-            </div>
-
-            <div class="applicant-navbar__dropdown-group">
-              <button type="button" class="applicant-navbar__dropdown-link" @click="handleMenuAction('open-help-center')">
-                <i class="bi bi-life-preserver" aria-hidden="true" />
-                <span>Help Center</span>
-              </button>
-              <button type="button" class="applicant-navbar__dropdown-link" @click="handleMenuAction('open-terms')">
-                <i class="bi bi-shield-check" aria-hidden="true" />
-                <span>Terms & Policies</span>
+                <span>Settings</span>
               </button>
             </div>
 

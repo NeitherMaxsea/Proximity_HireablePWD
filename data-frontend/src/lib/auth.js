@@ -583,12 +583,13 @@ const uploadRegistrationFiles = async ({ uid, role, formData, storageInstance = 
 }
 
 const mapProfileToStoredUser = (profile) => {
+  const inferredEmployerType = normalizeEmployerOrganizationType(profile)
   const normalizedProfile = {
     id: profile.id,
     uid: profile.id,
     public_id: text(profile.public_id),
     email: normalizeEmail(profile.email),
-    role: text(profile.role),
+    role: text(profile.role) || (inferredEmployerType ? 'employer' : ''),
     name: text(profile.name) || 'User',
     created_at: text(profile.created_at),
     reviewed_at: text(profile.reviewed_at),
@@ -684,7 +685,7 @@ const mapProfileToStoredUser = (profile) => {
     normalizedProfile.business_contact_email = normalizeEmail(
       profile.business_contact_email || profile.email,
     )
-    normalizedProfile.company_organization_type = normalizeEmployerOrganizationType(profile.company_organization_type)
+    normalizedProfile.company_organization_type = inferredEmployerType
     normalizedProfile.companyOrganizationType = normalizedProfile.company_organization_type
   }
 
@@ -834,23 +835,27 @@ const getProfileByUid = async (uid, options = {}) => {
   const dbInstance = options?.dbInstance || db
   await waitForScopedAuthReady(options?.authInstance || auth)
 
-  const snapshot = await getDoc(getUserDocRef(uid, dbInstance))
+  const [snapshot, employerSnapshot] = await Promise.all([
+    getDoc(getUserDocRef(uid, dbInstance)),
+    getDoc(getEmployerDocRef(uid, dbInstance)),
+  ])
+
+  if (employerSnapshot.exists()) {
+    return {
+      ...toEmployerRecord({
+        id: employerSnapshot.id,
+        ...(snapshot.exists() ? snapshot.data() : {}),
+        ...employerSnapshot.data(),
+      }),
+      __collection: EMPLOYERS_COLLECTION,
+    }
+  }
+
   if (snapshot.exists()) {
     return {
       id: snapshot.id,
       ...snapshot.data(),
       __collection: USERS_COLLECTION,
-    }
-  }
-
-  const employerSnapshot = await getDoc(getEmployerDocRef(uid, dbInstance))
-  if (employerSnapshot.exists()) {
-    return {
-      ...toEmployerRecord({
-        id: employerSnapshot.id,
-        ...employerSnapshot.data(),
-      }),
-      __collection: EMPLOYERS_COLLECTION,
     }
   }
 
@@ -868,29 +873,33 @@ const getProfileByEmail = async (email) => {
   if (!normalizedEmail) return null
   await waitForAuthReady()
 
-  const snapshot = await getDocs(
-    query(collection(db, USERS_COLLECTION), where('email', '==', normalizedEmail), limit(1)),
-  )
+  const [snapshot, employerSnapshot] = await Promise.all([
+    getDocs(
+      query(collection(db, USERS_COLLECTION), where('email', '==', normalizedEmail), limit(1)),
+    ),
+    getDocs(
+      query(collection(db, EMPLOYERS_COLLECTION), where('email', '==', normalizedEmail), limit(1)),
+    ),
+  ])
+
+  if (!employerSnapshot.empty) {
+    const userDoc = snapshot.empty ? null : snapshot.docs[0]
+    const employerDoc = employerSnapshot.docs[0]
+    return {
+      ...toEmployerRecord({
+        id: employerDoc.id,
+        ...(userDoc ? userDoc.data() : {}),
+        ...employerDoc.data(),
+      }),
+      __collection: EMPLOYERS_COLLECTION,
+    }
+  }
 
   if (!snapshot.empty) {
     return {
       id: snapshot.docs[0].id,
       ...snapshot.docs[0].data(),
       __collection: USERS_COLLECTION,
-    }
-  }
-
-  const employerSnapshot = await getDocs(
-    query(collection(db, EMPLOYERS_COLLECTION), where('email', '==', normalizedEmail), limit(1)),
-  )
-
-  if (!employerSnapshot.empty) {
-    return {
-      ...toEmployerRecord({
-        id: employerSnapshot.docs[0].id,
-        ...employerSnapshot.docs[0].data(),
-      }),
-      __collection: EMPLOYERS_COLLECTION,
     }
   }
 
@@ -1028,51 +1037,109 @@ const toApplicantRecord = (profile) => {
   }
 }
 
-const toEmployerRecord = (profile) => ({
-  id: profile.id,
-  public_id: text(profile.public_id),
-  approval_status: text(profile.approval_status) || 'pending',
-  email_verified: profile.email_verified === true,
-  email_verified_at: text(profile.email_verified_at),
-  created_at: text(profile.created_at),
-  sort_order: Number.isFinite(Number(profile?.sort_order)) ? Number(profile.sort_order) : null,
-  reviewed_at: text(profile.reviewed_at),
-  rejection_reason: text(profile.rejection_reason),
-  ban_reason: text(profile.ban_reason),
-  ban_duration: text(profile.ban_duration),
-  banned_until: text(profile.banned_until),
-  name: text(profile.name || profile.company_name),
-  email: normalizeEmail(profile.email),
-  company_name: text(profile.company_name || profile.name),
-  company_category: text(profile.company_category),
-  company_location: text(profile.company_location),
-  company_contact_number: text(profile.company_contact_number),
-  active_subscription_plan: text(profile.active_subscription_plan || profile.activeSubscriptionPlan),
-  active_subscription_mode: text(profile.active_subscription_mode || profile.activeSubscriptionMode),
-  premium_trial_started_at: text(profile.premium_trial_started_at || profile.premiumTrialStartedAt),
-  premium_trial_consumed_at: text(
-    profile.premium_trial_consumed_at
-    || profile.premiumTrialConsumedAt
-    || profile.premium_trial_started_at
-    || profile.premiumTrialStartedAt,
-  ),
-  premium_paid_started_at: text(profile.premium_paid_started_at || profile.premiumPaidStartedAt),
-  company_organization_type: normalizeEmployerOrganizationType(profile.company_organization_type),
-  company_verification_document_1_path: text(profile.company_verification_document_1_path),
-  company_verification_document_2_path: text(profile.company_verification_document_2_path),
-  company_verification_document_3_path: text(profile.company_verification_document_3_path),
-  business_avatar: text(profile.business_avatar || profile.avatar),
-  avatar: text(profile.avatar || profile.business_avatar),
-  business_avatar_path: text(profile.business_avatar_path || profile.avatar_path),
-  avatar_path: text(profile.avatar_path || profile.business_avatar_path),
-  role: 'employer',
-  user: {
+const toEmployerRecord = (profile) => {
+  const normalizedRecord = {
     id: profile.id,
-    email: normalizeEmail(profile.email),
+    public_id: text(profile.public_id),
+    approval_status: text(profile.approval_status) || 'pending',
+    email_verified: profile.email_verified === true,
+    email_verified_at: text(profile.email_verified_at),
+    created_at: text(profile.created_at),
+    sort_order: Number.isFinite(Number(profile?.sort_order)) ? Number(profile.sort_order) : null,
+    reviewed_at: text(profile.reviewed_at),
+    rejection_reason: text(profile.rejection_reason),
+    ban_reason: text(profile.ban_reason),
+    ban_duration: text(profile.ban_duration),
+    banned_until: text(profile.banned_until),
     name: text(profile.name || profile.company_name),
+    email: normalizeEmail(profile.email),
+    company_name: text(profile.company_name || profile.name),
+    company_category: text(profile.company_category),
+    company_location: text(profile.company_location),
+    company_contact_number: text(profile.company_contact_number),
+    active_subscription_plan: text(profile.active_subscription_plan || profile.activeSubscriptionPlan),
+    active_subscription_mode: text(profile.active_subscription_mode || profile.activeSubscriptionMode),
+    premium_trial_started_at: text(profile.premium_trial_started_at || profile.premiumTrialStartedAt),
+    premium_trial_consumed_at: text(
+      profile.premium_trial_consumed_at
+      || profile.premiumTrialConsumedAt
+      || profile.premium_trial_started_at
+      || profile.premiumTrialStartedAt,
+    ),
+    premium_paid_started_at: text(profile.premium_paid_started_at || profile.premiumPaidStartedAt),
+    company_organization_type: normalizeEmployerOrganizationType(profile),
+    company_verification_document_1_path: text(profile.company_verification_document_1_path),
+    company_verification_document_2_path: text(profile.company_verification_document_2_path),
+    company_verification_document_3_path: text(profile.company_verification_document_3_path),
+    business_avatar: text(profile.business_avatar || profile.avatar),
+    avatar: text(profile.avatar || profile.business_avatar),
+    business_avatar_path: text(profile.business_avatar_path || profile.avatar_path),
+    avatar_path: text(profile.avatar_path || profile.business_avatar_path),
     role: 'employer',
-  },
-})
+    user: {
+      id: profile.id,
+      email: normalizeEmail(profile.email),
+      name: text(profile.name || profile.company_name),
+      role: 'employer',
+    },
+  }
+
+  const workspaceOwnerId = text(profile.workspace_owner_id || profile.workspaceOwnerId)
+  const workspaceOwnerEmail = normalizeEmail(profile.workspace_owner_email || profile.workspaceOwnerEmail)
+  const workspaceOwnerRole = text(profile.workspace_owner_role || profile.workspaceOwnerRole)
+  const workspaceOwnerName = text(profile.workspace_owner_name || profile.workspaceOwnerName)
+  const normalizedRoleId = text(profile.roleId || profile.permissionRoleId || profile.role_id || profile.permission_role_id)
+  const normalizedPermissionRoleName = text(
+    profile.permissionRoleName || profile.permission_role_name || profile.roleName || profile.role_name,
+  )
+  const normalizedPermissionRoleSnapshot = normalizeWorkspacePermissionRoleSnapshot(profile)
+  const normalizedWorkspacePermissionRoles = normalizeWorkspacePermissionRoles(profile)
+
+  if (profile.workspace_member === true) {
+    normalizedRecord.workspace_member = true
+  }
+
+  if (workspaceOwnerId) {
+    normalizedRecord.workspace_owner_id = workspaceOwnerId
+    normalizedRecord.workspaceOwnerId = workspaceOwnerId
+  }
+
+  if (workspaceOwnerEmail) {
+    normalizedRecord.workspace_owner_email = workspaceOwnerEmail
+    normalizedRecord.workspaceOwnerEmail = workspaceOwnerEmail
+  }
+
+  if (workspaceOwnerRole) {
+    normalizedRecord.workspace_owner_role = workspaceOwnerRole
+    normalizedRecord.workspaceOwnerRole = workspaceOwnerRole
+  }
+
+  if (workspaceOwnerName) {
+    normalizedRecord.workspace_owner_name = workspaceOwnerName
+    normalizedRecord.workspaceOwnerName = workspaceOwnerName
+  }
+
+  if (normalizedRoleId) {
+    normalizedRecord.roleId = normalizedRoleId
+    normalizedRecord.permissionRoleId = normalizedRoleId
+  }
+
+  if (normalizedPermissionRoleName) {
+    normalizedRecord.permissionRoleName = normalizedPermissionRoleName
+  }
+
+  if (normalizedPermissionRoleSnapshot) {
+    normalizedRecord.permissionRoleSnapshot = normalizedPermissionRoleSnapshot
+    normalizedRecord.workspace_permission_role = cloneJson(normalizedPermissionRoleSnapshot)
+  }
+
+  if (normalizedWorkspacePermissionRoles.length) {
+    normalizedRecord.workspace_permission_roles = cloneJson(normalizedWorkspacePermissionRoles)
+    normalizedRecord.workspacePermissionRoles = cloneJson(normalizedWorkspacePermissionRoles)
+  }
+
+  return normalizedRecord
+}
 
 const toEmployerCollectionRecord = (profile) =>
   stripUndefined({
@@ -1080,7 +1147,7 @@ const toEmployerCollectionRecord = (profile) =>
     uid: profile.id,
     public_id: text(profile.public_id),
     role: 'employer',
-    account_type: normalizeEmployerOrganizationType(profile.company_organization_type),
+    account_type: normalizeEmployerOrganizationType(profile),
   })
 
 const getApplicantProfileDocRef = (profileOrUid) => {
@@ -1436,9 +1503,12 @@ export const subscribeToStoredAuthUserProfile = (handleNext, handleError) => {
         return
       }
 
-      const profileDocRef = text(profile.__collection) === APPLICANT_REGISTRATION_COLLECTION
+      const profileCollection = text(profile.__collection)
+      const profileDocRef = profileCollection === APPLICANT_REGISTRATION_COLLECTION
         ? getApplicantRegistrationDocRef(targetUid)
-        : getUserDocRef(targetUid)
+        : profileCollection === EMPLOYERS_COLLECTION
+          ? getEmployerDocRef(targetUid)
+          : getUserDocRef(targetUid)
 
       stopSnapshot = onSnapshot(
         profileDocRef,
@@ -2497,7 +2567,15 @@ const sortAdminRecordsByCreatedAt = (records) =>
 
 const isWorkspaceTeamMemberProfile = (profile) => {
   const workspaceOwnerId = text(profile?.workspace_owner_id || profile?.workspaceOwnerId)
-  return profile?.workspace_member === true || Boolean(workspaceOwnerId)
+  const profileId = text(profile?.id || profile?.uid)
+  const workspaceOwnerEmail = normalizeEmail(profile?.workspace_owner_email || profile?.workspaceOwnerEmail)
+  const profileEmail = normalizeEmail(profile?.email || profile?.gmail)
+
+  if (profile?.workspace_member === true) return true
+  if (workspaceOwnerId && profileId && workspaceOwnerId !== profileId) return true
+  if (!workspaceOwnerId && workspaceOwnerEmail && profileEmail && workspaceOwnerEmail !== profileEmail) return true
+
+  return false
 }
 
 const mapProfilesToAdminCollections = (profiles) => ({
@@ -3483,17 +3561,59 @@ export const restoreDeletedUserHistoryRecord = async (historyId) => {
   }
 }
 
-export const normalizeEmployerOrganizationType = (value) => {
-  const normalized = String(value || '').trim().toLowerCase()
-  if (normalized === 'business') return 'business'
-  if (normalized === 'company') return 'company'
-  return ''
+const inferEmployerOrganizationType = (value) => {
+  if (!value || typeof value !== 'object') return ''
+
+  const normalizedRole = String(value?.role || value?.user?.role || '').trim().toLowerCase()
+  if (['applicant', 'admin', 'system_admin'].includes(normalizedRole)) return ''
+
+  const hasBusinessWorkspaceSignals =
+    value?.workspace_member === true
+    || String(value?.workspace_owner_id || value?.workspaceOwnerId || '').trim() !== ''
+    || String(value?.roleId || value?.permissionRoleId || '').trim() !== ''
+    || (Array.isArray(value?.workspace_permission_roles) && value.workspace_permission_roles.length > 0)
+    || (Array.isArray(value?.workspacePermissionRoles) && value.workspacePermissionRoles.length > 0)
+    || String(value?.active_subscription_plan || value?.activeSubscriptionPlan || '').trim() !== ''
+    || String(value?.active_subscription_mode || value?.activeSubscriptionMode || '').trim() !== ''
+    || String(value?.business_avatar || value?.businessAvatar || value?.business_avatar_path || value?.businessAvatarPath || '').trim() !== ''
+
+  const hasBusinessIdentitySignals =
+    String(value?.company_name || value?.companyName || value?.name || '').trim() !== ''
+    && (
+      String(value?.company_category || value?.companyCategory || '').trim() !== ''
+      || String(value?.company_contact_number || value?.companyContactNumber || '').trim() !== ''
+      || String(value?.company_location || value?.companyLocation || '').trim() !== ''
+      || String(value?.company_verification_document_1_path || value?.companyVerificationDocument1Path || '').trim() !== ''
+      || String(value?.company_verification_document_2_path || value?.companyVerificationDocument2Path || '').trim() !== ''
+      || String(value?.company_verification_document_3_path || value?.companyVerificationDocument3Path || '').trim() !== ''
+    )
+
+  return hasBusinessWorkspaceSignals || hasBusinessIdentitySignals ? 'business' : ''
 }
 
-export const getEmployerDashboardRoute = (user) => {
-  const employerType = normalizeEmployerOrganizationType(
-    user?.company_organization_type || user?.companyOrganizationType,
-  )
+export const normalizeEmployerOrganizationType = (value) => {
+  const source = value && typeof value === 'object'
+    ? (
+      value.company_organization_type
+      || value.companyOrganizationType
+      || value.account_type
+      || value.accountType
+      || value.organization_type
+      || value.organizationType
+      || value.business_type
+      || value.businessType
+    )
+    : value
+
+  const normalized = String(source || '').trim().toLowerCase()
+  if (normalized === 'business' || normalized === 'business account') return 'business'
+  if (normalized === 'company' || normalized === 'company account') return 'company'
+
+  return inferEmployerOrganizationType(value)
+}
+
+export const getEmployerDashboardRoute = (user, fallbackEmployerType = '') => {
+  const employerType = normalizeEmployerOrganizationType(user) || normalizeEmployerOrganizationType(fallbackEmployerType)
 
   if (employerType === 'business') return '/employer/business'
   if (employerType === 'company') return '/employer/company'

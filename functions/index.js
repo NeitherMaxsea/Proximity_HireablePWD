@@ -1686,6 +1686,960 @@ const verifyBusinessPayMongoCheckoutSessionHandler = async (rawData, request) =>
   }
 }
 
+const deleteFieldValue = () => admin.firestore.FieldValue.delete()
+const serverTimestampField = () => admin.firestore.FieldValue.serverTimestamp()
+const withoutUndefined = (value = {}) =>
+  Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  )
+
+const commitFirestoreOperations = async (operations = []) => {
+  const normalizedOperations = operations.filter((operation) => operation?.type && operation?.ref)
+  if (!normalizedOperations.length) return 0
+
+  for (let index = 0; index < normalizedOperations.length; index += 450) {
+    const batch = db.batch()
+
+    normalizedOperations
+      .slice(index, index + 450)
+      .forEach((operation) => {
+        if (operation.type === 'delete') {
+          batch.delete(operation.ref)
+          return
+        }
+
+        batch.set(
+          operation.ref,
+          withoutUndefined(operation.data || {}),
+          operation.options || { merge: true },
+        )
+      })
+
+    await batch.commit()
+  }
+
+  return normalizedOperations.length
+}
+
+const BUSINESS_PERMISSION_MODULE_SECTIONS = [
+  {
+    id: 'general-system',
+    label: 'General & System',
+    icon: 'bi bi-grid-1x2-fill',
+    modules: [
+      { id: 'dashboard', label: 'Dashboard', description: 'Open the business workspace overview and summary cards.' },
+    ],
+  },
+  {
+    id: 'recruitment',
+    label: 'Recruitment',
+    icon: 'bi bi-briefcase-fill',
+    modules: [
+      { id: 'job-posting', label: 'Job Posting', description: 'Create and manage job opportunities.' },
+      { id: 'applicant-management', label: 'Applicant Management', description: 'Review applicants and move them through recruitment.' },
+    ],
+  },
+  {
+    id: 'assessment',
+    label: 'Assessment',
+    icon: 'bi bi-ui-checks-grid',
+    modules: [
+      { id: 'assessment-management', label: 'Assessment Management', description: 'Manage assessment sets and workflows.' },
+      { id: 'applicant-score', label: 'Applicant Score', description: 'Review scoring summaries and results.' },
+    ],
+  },
+  {
+    id: 'interview',
+    label: 'Interview',
+    icon: 'bi bi-calendar-event-fill',
+    modules: [
+      { id: 'interview-scheduling', label: 'Interview Scheduling', description: 'Schedule panels, slots, and follow-ups.' },
+    ],
+  },
+  {
+    id: 'training',
+    label: 'Training',
+    icon: 'bi bi-journal-richtext',
+    modules: [
+      { id: 'training-templates', label: 'Training Templates', description: 'Create and maintain training templates.' },
+      { id: 'assign-templates', label: 'Assign Templates', description: 'Assign learning flows to people and roles.' },
+    ],
+  },
+  {
+    id: 'employees',
+    label: 'User Management',
+    icon: 'bi bi-people-fill',
+    modules: [
+      { id: 'user-overview', label: 'User Overview', description: 'See user counts, linked members, and team status at a glance.' },
+      { id: 'create-user', label: 'Create User', description: 'Create workspace users and assign saved roles.' },
+      { id: 'add-employee', label: 'Add Employee', description: 'Link created users to employee profiles.' },
+    ],
+  },
+  {
+    id: 'permissions',
+    label: 'Permissions',
+    icon: 'bi bi-shield-lock-fill',
+    modules: [
+      { id: 'permissions', label: 'Permissions', description: 'Manage roles, module visibility, and access rules.' },
+    ],
+  },
+]
+
+const BUSINESS_PERMISSION_MODULE_CATALOG = BUSINESS_PERMISSION_MODULE_SECTIONS.flatMap((section) =>
+  section.modules.map((module) => ({
+    ...module,
+    sectionId: section.id,
+    sectionLabel: section.label,
+    sectionIcon: section.icon,
+  })))
+
+const normalizeBusinessWorkspacePermissionModulePermissions = (permissions = {}, legacyEnabled = false) => {
+  const full = Boolean(
+    permissions?.full
+    || (permissions?.view && permissions?.edit && permissions?.disable),
+  )
+  const edit = Boolean(permissions?.edit || full)
+  const view = Boolean(permissions?.view || legacyEnabled || edit || full)
+
+  return {
+    view,
+    edit,
+    full,
+  }
+}
+
+const createNormalizedBusinessWorkspacePermissionModules = (storedModules = []) =>
+  BUSINESS_PERMISSION_MODULE_CATALOG.map((meta) => {
+    const legacyUserManagementModule = Array.isArray(storedModules)
+      ? storedModules.find((module) => text(module?.id) === 'employees')
+      : null
+    const storedModule = Array.isArray(storedModules)
+      ? storedModules.find((module) => text(module?.id) === meta.id)
+        || (
+          meta.id === 'user-overview'
+          || meta.id === 'create-user'
+          || meta.id === 'add-employee'
+            ? legacyUserManagementModule
+            : null
+        )
+      : null
+
+    return {
+      id: meta.id,
+      label: meta.label,
+      description: meta.description,
+      sectionId: meta.sectionId,
+      sectionLabel: meta.sectionLabel,
+      permissions: normalizeBusinessWorkspacePermissionModulePermissions(
+        storedModule?.permissions,
+        Boolean(storedModule?.enabled),
+      ),
+    }
+  })
+
+const normalizeBusinessWorkspacePermissionRole = (role = {}, index = 0) => {
+  const roleId = text(role?.id || `role-${index + 1}`)
+  if (!roleId) return null
+
+  return withoutUndefined({
+    id: roleId,
+    name: text(role?.name || `Role ${index + 1}`) || `Role ${index + 1}`,
+    color: text(role?.color),
+    modules: createNormalizedBusinessWorkspacePermissionModules(role?.modules),
+  })
+}
+
+const normalizeBusinessWorkspacePermissionRoles = (roles = []) => {
+  const seenRoleIds = new Set()
+
+  return (Array.isArray(roles) ? roles : [])
+    .map((role, index) => normalizeBusinessWorkspacePermissionRole(role, index))
+    .filter((role) => {
+      const roleId = text(role?.id)
+      if (!roleId || seenRoleIds.has(roleId)) return false
+      seenRoleIds.add(roleId)
+      return true
+    })
+}
+
+const buildBusinessWorkspaceRoleMap = (roles = []) =>
+  new Map(
+    normalizeBusinessWorkspacePermissionRoles(roles)
+      .map((role) => [role.id, role]),
+  )
+
+const normalizeBusinessWorkspacePermissionRoleSnapshot = (snapshot = {}, fallback = {}) => {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return null
+
+  return normalizeBusinessWorkspacePermissionRole({
+    ...snapshot,
+    id: text(snapshot?.id || fallback?.roleId || fallback?.permissionRoleId || fallback?.id),
+    name: text(snapshot?.name || fallback?.permissionRoleName || fallback?.roleName || 'Assigned Role') || 'Assigned Role',
+  }, 0)
+}
+
+const loadAccountProfileState = async (uid) => {
+  const normalizedUid = text(uid)
+  if (!normalizedUid) return null
+
+  const userDocRef = db.collection(USERS_COLLECTION).doc(normalizedUid)
+  const employerDocRef = db.collection(EMPLOYERS_COLLECTION).doc(normalizedUid)
+  const [userSnapshot, employerSnapshot] = await Promise.all([
+    userDocRef.get(),
+    employerDocRef.get(),
+  ])
+
+  if (!userSnapshot.exists && !employerSnapshot.exists) return null
+
+  return {
+    uid: normalizedUid,
+    userDocRef,
+    employerDocRef,
+    userSnapshot,
+    employerSnapshot,
+    profile: {
+      id: normalizedUid,
+      ...(employerSnapshot.exists ? employerSnapshot.data() || {} : {}),
+      ...(userSnapshot.exists ? userSnapshot.data() || {} : {}),
+    },
+  }
+}
+
+const resolveBusinessWorkspaceOwnerSummary = (profile = {}, fallbackWorkspaceOwnerId = '') => {
+  const workspaceOwnerId = text(profile?.id || fallbackWorkspaceOwnerId)
+  const companyName = text(profile?.company_name || profile?.name || 'Business Workspace')
+
+  return {
+    workspaceOwnerId,
+    workspaceOwnerEmail: normalizeEmail(profile?.business_contact_email || profile?.email),
+    workspaceOwnerRole: text(profile?.workspace_owner_role || profile?.role || 'employer') || 'employer',
+    workspaceOwnerName: text(profile?.workspace_owner_name || profile?.company_name || profile?.name || companyName) || companyName,
+    companyName,
+    companyCategory: text(profile?.company_category),
+    companyLocation: text(profile?.company_location),
+    companyContactNumber: text(profile?.company_contact_number),
+    companyOrganizationType: normalizeOrganizationType(
+      profile?.company_organization_type || profile?.companyOrganizationType || 'business',
+    ) || 'business',
+  }
+}
+
+const resolveBusinessWorkspaceAssignedRole = ({ profile = {}, persistedRoles = [] }) => {
+  const normalizedRoles = normalizeBusinessWorkspacePermissionRoles(persistedRoles)
+  const roleMap = buildBusinessWorkspaceRoleMap(normalizedRoles)
+  const explicitRoleId = text(
+    profile?.roleId
+    || profile?.permissionRoleId
+    || profile?.role_id
+    || profile?.permission_role_id,
+  )
+
+  if (explicitRoleId) {
+    const matchedRole = roleMap.get(explicitRoleId) || null
+    if (matchedRole) return matchedRole
+    if (normalizedRoles.length) return null
+  }
+
+  return normalizeBusinessWorkspacePermissionRoleSnapshot(
+    profile?.permissionRoleSnapshot
+      || profile?.workspace_permission_role
+      || profile?.permission_role_snapshot
+      || profile?.roleSnapshot,
+    {
+      roleId: explicitRoleId,
+      permissionRoleId: explicitRoleId,
+      permissionRoleName: profile?.permissionRoleName || profile?.roleName,
+    },
+  )
+}
+
+const getBusinessWorkspaceModuleAccess = (moduleId, role = null) => {
+  const normalizedModuleId = text(moduleId)
+  const isManagedModule = BUSINESS_PERMISSION_MODULE_CATALOG.some((module) => module.id === normalizedModuleId)
+
+  if (!normalizedModuleId || !isManagedModule) {
+    return { view: true, edit: true, full: true }
+  }
+
+  const roleModule = Array.isArray(role?.modules)
+    ? role.modules.find((module) => text(module?.id) === normalizedModuleId)
+    : null
+  const permissions = normalizeBusinessWorkspacePermissionModulePermissions(roleModule?.permissions)
+  const full = Boolean(permissions.full)
+  const edit = Boolean(permissions.edit || full)
+  const view = Boolean(permissions.view || edit || full)
+
+  return {
+    view,
+    edit,
+    full,
+  }
+}
+
+const resolveBusinessWorkspaceRequestContext = async (request, rawData = {}) => {
+  const requesterUid = assertSignedInRequest(request, 'Sign in again before managing the business workspace.')
+  const requestedWorkspaceOwnerId = text(rawData?.workspaceOwnerId || rawData?.workspace_owner_id)
+  const requesterState = await loadAccountProfileState(requesterUid)
+
+  if (!requesterState) {
+    throw new HttpsError('failed-precondition', 'Your account profile is unavailable right now.')
+  }
+
+  const requesterProfile = requesterState.profile || {}
+  const requesterToken = request?.auth?.token || {}
+  const tokenRole = getRoleFromValue(
+    requesterToken.role || requesterToken.user_role || requesterToken.accountType,
+  )
+  const requesterRole = normalizeRole(
+    requesterProfile?.role || requesterProfile?.user_role || requesterProfile?.accountType || tokenRole,
+  )
+  const requesterIsAdmin =
+    requesterToken.admin === true
+    || requesterToken.is_admin === true
+    || requesterToken.system_admin === true
+    || ADMIN_ROLES.has(tokenRole)
+    || ADMIN_ROLES.has(requesterRole)
+  const requesterWorkspaceOwnerId = text(
+    requesterProfile?.workspace_owner_id || requesterProfile?.workspaceOwnerId,
+  )
+  const requesterIsWorkspaceMember =
+    requesterProfile?.workspace_member === true
+    || Boolean(requesterWorkspaceOwnerId)
+
+  let workspaceOwnerId = ''
+
+  if (requesterIsAdmin) {
+    workspaceOwnerId = requestedWorkspaceOwnerId || requesterWorkspaceOwnerId || requesterUid
+  } else if (requesterIsWorkspaceMember) {
+    workspaceOwnerId = requesterWorkspaceOwnerId
+    if (requestedWorkspaceOwnerId && requestedWorkspaceOwnerId !== workspaceOwnerId) {
+      throw new HttpsError('permission-denied', 'You can only manage the business workspace assigned to your account.')
+    }
+  } else if (requesterRole === 'employer') {
+    workspaceOwnerId = requesterUid
+    if (requestedWorkspaceOwnerId && requestedWorkspaceOwnerId !== workspaceOwnerId) {
+      throw new HttpsError('permission-denied', 'You can only manage your own business workspace.')
+    }
+  } else {
+    throw new HttpsError('permission-denied', 'Only business workspace accounts can use this permission flow.')
+  }
+
+  if (!workspaceOwnerId) {
+    throw new HttpsError('failed-precondition', 'A business workspace owner could not be resolved for this account.')
+  }
+
+  const workspaceOwnerState = await loadAccountProfileState(workspaceOwnerId)
+  if (!workspaceOwnerState) {
+    throw new HttpsError('not-found', 'That business workspace no longer exists.')
+  }
+
+  const workspaceOwnerProfile = workspaceOwnerState.profile || {}
+  const ownerOrganizationType = normalizeOrganizationType(
+    workspaceOwnerProfile?.company_organization_type
+    || workspaceOwnerProfile?.companyOrganizationType
+    || rawData?.companyOrganizationType
+    || rawData?.company_organization_type,
+  )
+
+  if (ownerOrganizationType && ownerOrganizationType !== 'business') {
+    throw new HttpsError('failed-precondition', 'This permission flow is only available for business workspaces.')
+  }
+
+  const workspacePermissionRoles = normalizeBusinessWorkspacePermissionRoles(
+    workspaceOwnerProfile?.workspace_permission_roles
+    || workspaceOwnerProfile?.workspacePermissionRoles
+    || rawData?.roles
+    || rawData?.workspacePermissionRoles
+    || rawData?.workspace_permission_roles,
+  )
+  const workspacePermissionRolesById = buildBusinessWorkspaceRoleMap(workspacePermissionRoles)
+  const hasOwnerWorkspaceAccess =
+    !requesterIsAdmin
+    && requesterRole === 'employer'
+    && !requesterIsWorkspaceMember
+    && workspaceOwnerId === requesterUid
+  const requesterPermissionRole = requesterIsWorkspaceMember
+    ? resolveBusinessWorkspaceAssignedRole({
+        profile: requesterProfile,
+        persistedRoles: workspacePermissionRoles,
+      })
+    : null
+
+  return {
+    requesterUid,
+    requesterProfile,
+    requesterRole,
+    requesterIsAdmin,
+    requesterIsWorkspaceMember,
+    workspaceOwnerId,
+    workspaceOwnerState,
+    workspaceOwnerProfile,
+    workspacePermissionRoles,
+    workspacePermissionRolesById,
+    requesterPermissionRole,
+    hasOwnerWorkspaceAccess,
+    getModuleAccess(moduleId) {
+      if (requesterIsAdmin || hasOwnerWorkspaceAccess) {
+        return { view: true, edit: true, full: true }
+      }
+
+      return getBusinessWorkspaceModuleAccess(moduleId, requesterPermissionRole)
+    },
+  }
+}
+
+const assertCanEditBusinessWorkspaceModule = (context, moduleId, fallbackMessage) => {
+  if (context?.requesterIsAdmin || context?.hasOwnerWorkspaceAccess) return
+
+  const access = context?.getModuleAccess ? context.getModuleAccess(moduleId) : { edit: false }
+  if (!access.edit) {
+    throw new HttpsError('permission-denied', fallbackMessage)
+  }
+}
+
+const findExistingAccountDocsByEmail = async (email) =>
+  collectDocsFromReadRefs([
+    ...buildCollectionEqualityReadRefs(USERS_COLLECTION, 'email', [email], uniqueEmailValues),
+    ...buildCollectionEqualityReadRefs(EMPLOYERS_COLLECTION, 'email', [email], uniqueEmailValues),
+    ...buildCollectionEqualityReadRefs(APPLICANT_REGISTRATION_COLLECTION, 'email', [email], uniqueEmailValues),
+  ])
+
+const appendBusinessWorkspaceUserSyncOperations = ({
+  operations = [],
+  workspaceOwnerId = '',
+  workspaceOwnerProfile = {},
+  workspacePermissionRoles = [],
+  workspacePermissionRolesById = new Map(),
+  userSnapshot = null,
+  directorySnapshot = null,
+  memberEmployerSnapshot = null,
+  updatedAt = nowIso(),
+}) => {
+  if (!userSnapshot?.ref || !text(userSnapshot?.id)) return 0
+
+  const userId = text(userSnapshot.id)
+  const userProfile = userSnapshot.data() || {}
+  const directoryProfile = directorySnapshot?.data ? directorySnapshot.data() || {} : {}
+  const memberEmployerProfile = memberEmployerSnapshot?.data ? memberEmployerSnapshot.data() || {} : {}
+  const ownerSummary = resolveBusinessWorkspaceOwnerSummary(workspaceOwnerProfile, workspaceOwnerId)
+  const fallbackWorkspaceRoles = normalizeBusinessWorkspacePermissionRoles(
+    userProfile?.workspace_permission_roles || userProfile?.workspacePermissionRoles,
+  )
+  const effectiveWorkspacePermissionRoles = workspacePermissionRoles.length
+    ? workspacePermissionRoles
+    : fallbackWorkspaceRoles
+  const effectiveWorkspacePermissionRolesById = workspacePermissionRoles.length
+    ? workspacePermissionRolesById
+    : buildBusinessWorkspaceRoleMap(effectiveWorkspacePermissionRoles)
+  const assignedRoleId = text(
+    userProfile?.roleId
+    || userProfile?.permissionRoleId
+    || userProfile?.role_id
+    || userProfile?.permission_role_id
+    || directoryProfile?.role_id
+    || directoryProfile?.roleId,
+  )
+  const fallbackRoleSnapshot = normalizeBusinessWorkspacePermissionRoleSnapshot(
+    userProfile?.permissionRoleSnapshot
+      || userProfile?.workspace_permission_role
+      || directoryProfile?.permissionRoleSnapshot
+      || directoryProfile?.workspace_permission_role
+      || directoryProfile?.roleSnapshot,
+    {
+      roleId: assignedRoleId,
+      permissionRoleId: assignedRoleId,
+      permissionRoleName:
+        userProfile?.permissionRoleName
+        || userProfile?.roleName
+        || directoryProfile?.permissionRoleName
+        || directoryProfile?.roleName,
+    },
+  )
+  const matchedRole = assignedRoleId
+    ? effectiveWorkspacePermissionRolesById.get(assignedRoleId)
+      || (!effectiveWorkspacePermissionRoles.length ? fallbackRoleSnapshot : null)
+    : (!effectiveWorkspacePermissionRoles.length ? fallbackRoleSnapshot : null)
+  const fallbackRoleName = text(
+    matchedRole?.name
+    || userProfile?.permissionRoleName
+    || userProfile?.permission_role_name
+    || userProfile?.roleName
+    || userProfile?.role_name
+    || directoryProfile?.permissionRoleName
+    || directoryProfile?.permission_role_name
+    || directoryProfile?.roleName
+    || directoryProfile?.role_name
+    || memberEmployerProfile?.roleName
+    || memberEmployerProfile?.role_name,
+  )
+  const normalizedEmail = normalizeEmail(
+    userProfile?.email || directoryProfile?.email || directoryProfile?.gmail,
+  )
+  const name = text(userProfile?.name || directoryProfile?.name || 'Workspace User') || 'Workspace User'
+  const status = text(directoryProfile?.status || userProfile?.status || 'Active') || 'Active'
+  const lastActive = text(directoryProfile?.lastActive || directoryProfile?.last_active)
+    || (status === 'Active' ? 'Account ready to log in' : 'Recently updated')
+  const createdAt = text(directoryProfile?.created_at || userProfile?.created_at || updatedAt) || updatedAt
+  const directoryRef = directorySnapshot?.ref
+    || db.collection(EMPLOYERS_COLLECTION).doc(workspaceOwnerId).collection(WORKSPACE_USERS_SUBCOLLECTION).doc(userId)
+
+  operations.push({
+    type: 'set',
+    ref: userSnapshot.ref,
+    data: {
+      workspace_permission_roles: effectiveWorkspacePermissionRoles,
+      updated_at: updatedAt,
+      roleId: assignedRoleId || deleteFieldValue(),
+      permissionRoleId: assignedRoleId || deleteFieldValue(),
+      permissionRoleName: matchedRole ? matchedRole.name : deleteFieldValue(),
+      permissionRoleSnapshot: matchedRole ? matchedRole : deleteFieldValue(),
+      workspace_permission_role: matchedRole ? matchedRole : deleteFieldValue(),
+    },
+    options: { merge: true },
+  })
+
+  operations.push({
+    type: 'set',
+    ref: directoryRef,
+    data: {
+      id: userId,
+      uid: userId,
+      name,
+      email: normalizedEmail,
+      gmail: normalizedEmail,
+      status,
+      lastActive,
+      last_active: lastActive,
+      created_at: createdAt,
+      created_at_server: directorySnapshot ? undefined : serverTimestampField(),
+      updated_at: updatedAt,
+      updated_at_server: serverTimestampField(),
+      workspace_owner_id: workspaceOwnerId,
+      workspace_owner_email: ownerSummary.workspaceOwnerEmail,
+      workspace_owner_role: ownerSummary.workspaceOwnerRole,
+      workspace_owner_name: ownerSummary.workspaceOwnerName,
+      business_name: ownerSummary.companyName,
+      company_name: ownerSummary.companyName,
+      company_organization_type: ownerSummary.companyOrganizationType,
+      role_id: assignedRoleId || deleteFieldValue(),
+      permission_role_id: assignedRoleId || deleteFieldValue(),
+      roleId: assignedRoleId || deleteFieldValue(),
+      permissionRoleId: assignedRoleId || deleteFieldValue(),
+      role_name: matchedRole ? matchedRole.name : (fallbackRoleName || deleteFieldValue()),
+      permission_role_name: matchedRole ? matchedRole.name : (fallbackRoleName || deleteFieldValue()),
+      roleName: matchedRole ? matchedRole.name : (fallbackRoleName || deleteFieldValue()),
+      permissionRoleName: matchedRole ? matchedRole.name : (fallbackRoleName || deleteFieldValue()),
+      roleSnapshot: matchedRole ? matchedRole : deleteFieldValue(),
+      permissionRoleSnapshot: matchedRole ? matchedRole : deleteFieldValue(),
+      workspace_permission_role: matchedRole ? matchedRole : deleteFieldValue(),
+    },
+    options: { merge: true },
+  })
+
+  if (memberEmployerSnapshot?.ref) {
+    operations.push({
+      type: 'set',
+      ref: memberEmployerSnapshot.ref,
+      data: {
+        role_id: assignedRoleId || deleteFieldValue(),
+        role_name: matchedRole ? matchedRole.name : (fallbackRoleName || deleteFieldValue()),
+        updated_at: updatedAt,
+        updated_at_server: serverTimestampField(),
+      },
+      options: { merge: true },
+    })
+  }
+
+  return 1
+}
+
+const createBusinessWorkspaceUserHandler = async (rawData, request) => {
+  const context = await resolveBusinessWorkspaceRequestContext(request, rawData)
+  assertCanEditBusinessWorkspaceModule(
+    context,
+    'create-user',
+    'Your account is not allowed to create workspace users.',
+  )
+
+  const fullName = text(rawData?.fullName)
+  const email = normalizeEmail(rawData?.email)
+  const password = String(rawData?.password || '')
+  const roleId = text(rawData?.roleId || rawData?.permissionRoleId)
+
+  if (!fullName || !email || !password.trim() || !roleId) {
+    throw new HttpsError('invalid-argument', 'Please complete the full name, email, password, and assigned role fields.')
+  }
+
+  if (!isValidEmail(email)) {
+    throw new HttpsError('invalid-argument', 'Use a valid email address for the workspace user.')
+  }
+
+  if (password.trim().length < 8) {
+    throw new HttpsError('invalid-argument', 'Temporary password must be at least 8 characters long.')
+  }
+
+  const existingAccountDocs = await findExistingAccountDocsByEmail(email)
+  if (existingAccountDocs.length) {
+    throw new HttpsError('already-exists', 'This email address already has an account.')
+  }
+
+  try {
+    await admin.auth().getUserByEmail(email)
+    throw new HttpsError('already-exists', 'This email address already has an account.')
+  } catch (error) {
+    if (error instanceof HttpsError) throw error
+    if (text(error?.code).toLowerCase() !== 'auth/user-not-found') {
+      console.error('Unable to check Firebase Auth for an existing workspace user.', error)
+      throw new HttpsError('internal', 'The workspace user could not be validated right now. Please try again.')
+    }
+  }
+
+  const payloadRoles = normalizeBusinessWorkspacePermissionRoles(
+    rawData?.roles || rawData?.workspacePermissionRoles || rawData?.workspace_permission_roles,
+  )
+  const workspaceRoles = context.workspacePermissionRoles.length
+    ? context.workspacePermissionRoles
+    : payloadRoles.length
+      ? payloadRoles
+      : []
+  const roleMap = buildBusinessWorkspaceRoleMap(workspaceRoles)
+  const fallbackRoleSnapshot = normalizeBusinessWorkspacePermissionRoleSnapshot(
+    rawData?.permissionRoleSnapshot || rawData?.workspace_permission_role,
+    {
+      roleId,
+      permissionRoleId: roleId,
+      permissionRoleName: rawData?.permissionRoleName || rawData?.roleName,
+    },
+  )
+  const matchedRole = roleMap.get(roleId) || fallbackRoleSnapshot
+
+  if (!matchedRole) {
+    throw new HttpsError('invalid-argument', 'Choose an existing role before creating this workspace user.')
+  }
+
+  const resolvedWorkspaceRoles = workspaceRoles.length ? workspaceRoles : [matchedRole]
+  const ownerSummary = resolveBusinessWorkspaceOwnerSummary(
+    context.workspaceOwnerProfile,
+    context.workspaceOwnerId,
+  )
+  const createdAt = nowIso()
+  const roleName = text(matchedRole?.name || rawData?.permissionRoleName || rawData?.roleName)
+  let createdAuthUser = null
+
+  try {
+    createdAuthUser = await admin.auth().createUser({
+      email,
+      password: password.trim(),
+      displayName: fullName,
+      emailVerified: true,
+      disabled: false,
+    })
+
+    const uid = text(createdAuthUser?.uid)
+    const userDocRef = db.collection(USERS_COLLECTION).doc(uid)
+    const workspaceDirectoryDocRef = db
+      .collection(EMPLOYERS_COLLECTION)
+      .doc(context.workspaceOwnerId)
+      .collection(WORKSPACE_USERS_SUBCOLLECTION)
+      .doc(uid)
+
+    await commitFirestoreOperations([
+      {
+        type: 'set',
+        ref: userDocRef,
+        data: {
+          id: uid,
+          uid,
+          email,
+          role: 'employer',
+          name: fullName,
+          approval_status: 'approved',
+          email_verified: true,
+          email_verified_at: createdAt,
+          created_at: createdAt,
+          updated_at: createdAt,
+          company_name: text(rawData?.companyName || ownerSummary.companyName || 'Business Workspace') || 'Business Workspace',
+          company_category: text(rawData?.companyCategory || ownerSummary.companyCategory),
+          company_location: text(rawData?.companyLocation || ownerSummary.companyLocation),
+          company_contact_number: text(rawData?.companyContactNumber || ownerSummary.companyContactNumber),
+          business_contact_email: ownerSummary.workspaceOwnerEmail || email,
+          company_organization_type:
+            normalizeOrganizationType(
+              rawData?.companyOrganizationType
+              || rawData?.company_organization_type
+              || ownerSummary.companyOrganizationType
+              || 'business',
+            ) || 'business',
+          workspace_member: true,
+          workspace_owner_id: context.workspaceOwnerId,
+          workspace_owner_email: ownerSummary.workspaceOwnerEmail,
+          workspace_owner_role: ownerSummary.workspaceOwnerRole,
+          workspace_owner_name: ownerSummary.workspaceOwnerName,
+          roleId,
+          permissionRoleId: roleId,
+          workspace_permission_roles: resolvedWorkspaceRoles,
+          permissionRoleName: roleName || undefined,
+          permissionRoleSnapshot: matchedRole,
+          workspace_permission_role: matchedRole,
+        },
+        options: { merge: true },
+      },
+      {
+        type: 'set',
+        ref: workspaceDirectoryDocRef,
+        data: {
+          id: uid,
+          uid,
+          name: fullName,
+          email,
+          gmail: email,
+          status: 'Active',
+          lastActive: 'Account ready to log in',
+          last_active: 'Account ready to log in',
+          created_at: createdAt,
+          created_at_server: serverTimestampField(),
+          updated_at: createdAt,
+          updated_at_server: serverTimestampField(),
+          workspace_owner_id: context.workspaceOwnerId,
+          workspace_owner_email: ownerSummary.workspaceOwnerEmail,
+          workspace_owner_role: ownerSummary.workspaceOwnerRole,
+          workspace_owner_name: ownerSummary.workspaceOwnerName,
+          business_name: ownerSummary.companyName,
+          company_name: ownerSummary.companyName,
+          company_organization_type: ownerSummary.companyOrganizationType,
+          role_id: roleId,
+          permission_role_id: roleId,
+          roleId,
+          permissionRoleId: roleId,
+          role_name: roleName || undefined,
+          permission_role_name: roleName || undefined,
+          roleName: roleName || undefined,
+          permissionRoleName: roleName || undefined,
+          roleSnapshot: matchedRole,
+          permissionRoleSnapshot: matchedRole,
+          workspace_permission_role: matchedRole,
+        },
+        options: { merge: true },
+      },
+    ])
+
+    return {
+      user: {
+        id: uid,
+        uid,
+        email,
+        role: 'employer',
+        name: fullName,
+        approval_status: 'approved',
+        email_verified: true,
+        email_verified_at: createdAt,
+        created_at: createdAt,
+        workspace_member: true,
+        workspace_owner_id: context.workspaceOwnerId,
+        workspace_owner_email: ownerSummary.workspaceOwnerEmail,
+        workspace_owner_role: ownerSummary.workspaceOwnerRole,
+        workspace_owner_name: ownerSummary.workspaceOwnerName,
+        roleId,
+        permissionRoleId: roleId,
+        permissionRoleName: roleName || undefined,
+        permissionRoleSnapshot: matchedRole,
+        workspace_permission_role: matchedRole,
+        workspace_permission_roles: resolvedWorkspaceRoles,
+        company_name: text(rawData?.companyName || ownerSummary.companyName || 'Business Workspace') || 'Business Workspace',
+        company_category: text(rawData?.companyCategory || ownerSummary.companyCategory),
+        company_location: text(rawData?.companyLocation || ownerSummary.companyLocation),
+        company_contact_number: text(rawData?.companyContactNumber || ownerSummary.companyContactNumber),
+        business_contact_email: ownerSummary.workspaceOwnerEmail || email,
+        company_organization_type:
+          normalizeOrganizationType(
+            rawData?.companyOrganizationType
+            || rawData?.company_organization_type
+            || ownerSummary.companyOrganizationType
+            || 'business',
+          ) || 'business',
+      },
+    }
+  } catch (error) {
+    if (createdAuthUser?.uid) {
+      await admin.auth().deleteUser(createdAuthUser.uid).catch((cleanupError) => {
+        console.error('Failed to roll back a partially created workspace auth user.', cleanupError)
+      })
+    }
+
+    if (error instanceof HttpsError) throw error
+
+    const code = text(error?.code).toLowerCase()
+    if (code === 'auth/email-already-exists') {
+      throw new HttpsError('already-exists', 'This email address already has an account.')
+    }
+
+    if (code === 'auth/invalid-email' || code === 'auth/invalid-password' || code === 'auth/weak-password') {
+      throw new HttpsError('invalid-argument', 'Please review the workspace user details and try again.')
+    }
+
+    console.error('createBusinessWorkspaceUser failed', error)
+    throw new HttpsError(
+      'internal',
+      text(error?.message) || 'The workspace user could not be created right now.',
+    )
+  }
+}
+
+const saveBusinessWorkspacePermissionsHandler = async (rawData, request) => {
+  const context = await resolveBusinessWorkspaceRequestContext(request, rawData)
+  assertCanEditBusinessWorkspaceModule(
+    context,
+    'permissions',
+    'Your account is not allowed to manage workspace permissions.',
+  )
+
+  const roles = normalizeBusinessWorkspacePermissionRoles(rawData?.roles)
+  if (!roles.length) {
+    throw new HttpsError('invalid-argument', 'Create at least one workspace permission role before saving.')
+  }
+
+  const selectedRoleId = roles.some((role) => role.id === text(rawData?.selectedRoleId))
+    ? text(rawData?.selectedRoleId)
+    : roles[0]?.id || ''
+  const roleMap = buildBusinessWorkspaceRoleMap(roles)
+  const updatedAt = nowIso()
+  const workspaceUserSnapshots = (await collectWorkspaceMemberAccountDocs(context.workspaceOwnerId))
+    .filter((snapshot) => text(snapshot?.id) && snapshot.id !== context.workspaceOwnerId)
+  const directorySnapshots = await collectWorkspaceSubcollectionDocs(
+    context.workspaceOwnerId,
+    WORKSPACE_USERS_SUBCOLLECTION,
+  )
+  const memberEmployerSnapshots = await collectWorkspaceSubcollectionDocs(
+    context.workspaceOwnerId,
+    MEMBER_EMPLOYER_SUBCOLLECTION,
+  )
+  const directoryByUserId = new Map(directorySnapshots.map((snapshot) => [text(snapshot?.id), snapshot]))
+  const memberEmployerByUserId = new Map(
+    memberEmployerSnapshots.map((snapshot) => [
+      text(snapshot?.data()?.linked_user_id || snapshot?.data()?.linkedUserId || snapshot?.id),
+      snapshot,
+    ]),
+  )
+  const operations = []
+
+  if (context.workspaceOwnerState?.userSnapshot?.exists) {
+    operations.push({
+      type: 'set',
+      ref: context.workspaceOwnerState.userDocRef,
+      data: {
+        workspace_permission_roles: roles,
+        updated_at: updatedAt,
+      },
+      options: { merge: true },
+    })
+  }
+
+  if (context.workspaceOwnerState?.employerSnapshot?.exists) {
+    operations.push({
+      type: 'set',
+      ref: context.workspaceOwnerState.employerDocRef,
+      data: {
+        workspace_permission_roles: roles,
+        updated_at: updatedAt,
+      },
+      options: { merge: true },
+    })
+  }
+
+  let updatedWorkspaceUserCount = 0
+
+  workspaceUserSnapshots.forEach((snapshot) => {
+    updatedWorkspaceUserCount += appendBusinessWorkspaceUserSyncOperations({
+      operations,
+      workspaceOwnerId: context.workspaceOwnerId,
+      workspaceOwnerProfile: context.workspaceOwnerProfile,
+      workspacePermissionRoles: roles,
+      workspacePermissionRolesById: roleMap,
+      userSnapshot: snapshot,
+      directorySnapshot: directoryByUserId.get(text(snapshot?.id)) || null,
+      memberEmployerSnapshot: memberEmployerByUserId.get(text(snapshot?.id)) || null,
+      updatedAt,
+    })
+  })
+
+  const validWorkspaceUserIds = new Set(workspaceUserSnapshots.map((snapshot) => text(snapshot?.id)).filter(Boolean))
+
+  directorySnapshots.forEach((snapshot) => {
+    const snapshotId = text(snapshot?.id)
+    if (!snapshotId || validWorkspaceUserIds.has(snapshotId)) return
+    operations.push({
+      type: 'delete',
+      ref: snapshot.ref,
+    })
+  })
+
+  await commitFirestoreOperations(operations)
+
+  return {
+    saved: true,
+    selectedRoleId,
+    roles,
+    updatedWorkspaceUserCount,
+  }
+}
+
+const syncBusinessWorkspaceUserDirectoryHandler = async (rawData, request) => {
+  const context = await resolveBusinessWorkspaceRequestContext(request, rawData)
+  const updatedAt = nowIso()
+  const workspaceUserSnapshots = (await collectWorkspaceMemberAccountDocs(context.workspaceOwnerId))
+    .filter((snapshot) => text(snapshot?.id) && snapshot.id !== context.workspaceOwnerId)
+  const directorySnapshots = await collectWorkspaceSubcollectionDocs(
+    context.workspaceOwnerId,
+    WORKSPACE_USERS_SUBCOLLECTION,
+  )
+  const memberEmployerSnapshots = await collectWorkspaceSubcollectionDocs(
+    context.workspaceOwnerId,
+    MEMBER_EMPLOYER_SUBCOLLECTION,
+  )
+  const directoryByUserId = new Map(directorySnapshots.map((snapshot) => [text(snapshot?.id), snapshot]))
+  const memberEmployerByUserId = new Map(
+    memberEmployerSnapshots.map((snapshot) => [
+      text(snapshot?.data()?.linked_user_id || snapshot?.data()?.linkedUserId || snapshot?.id),
+      snapshot,
+    ]),
+  )
+  const operations = []
+  let syncedWorkspaceUserCount = 0
+
+  workspaceUserSnapshots.forEach((snapshot) => {
+    syncedWorkspaceUserCount += appendBusinessWorkspaceUserSyncOperations({
+      operations,
+      workspaceOwnerId: context.workspaceOwnerId,
+      workspaceOwnerProfile: context.workspaceOwnerProfile,
+      workspacePermissionRoles: context.workspacePermissionRoles,
+      workspacePermissionRolesById: context.workspacePermissionRolesById,
+      userSnapshot: snapshot,
+      directorySnapshot: directoryByUserId.get(text(snapshot?.id)) || null,
+      memberEmployerSnapshot: memberEmployerByUserId.get(text(snapshot?.id)) || null,
+      updatedAt,
+    })
+  })
+
+  const validWorkspaceUserIds = new Set(workspaceUserSnapshots.map((snapshot) => text(snapshot?.id)).filter(Boolean))
+
+  directorySnapshots.forEach((snapshot) => {
+    const snapshotId = text(snapshot?.id)
+    if (!snapshotId || validWorkspaceUserIds.has(snapshotId)) return
+    operations.push({
+      type: 'delete',
+      ref: snapshot.ref,
+    })
+  })
+
+  await commitFirestoreOperations(operations)
+
+  return {
+    synced: true,
+    workspaceOwnerId: context.workspaceOwnerId,
+    syncedWorkspaceUserCount,
+  }
+}
+
 exports.sendEmployerRegistrationOtp = onCall(publicCallableOptions, async (request) =>
   sendEmployerRegistrationOtpHandler(request.data))
 
@@ -1715,6 +2669,15 @@ exports.updateBusinessJobPost = onCall(async (request) =>
 
 exports.deleteBusinessJobPost = onCall(async (request) =>
   deleteBusinessJobPostHandler(request.data, request))
+
+exports.createBusinessWorkspaceUser = onCall(async (request) =>
+  createBusinessWorkspaceUserHandler(request.data, request))
+
+exports.saveBusinessWorkspacePermissions = onCall(async (request) =>
+  saveBusinessWorkspacePermissionsHandler(request.data, request))
+
+exports.syncBusinessWorkspaceUserDirectory = onCall(async (request) =>
+  syncBusinessWorkspaceUserDirectoryHandler(request.data, request))
 
 exports.createBusinessPayMongoCheckoutSession = onCall(async (request) =>
   createBusinessPayMongoCheckoutSessionHandler(request.data, request))

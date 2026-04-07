@@ -15,7 +15,14 @@ const props = defineProps({
 const emit = defineEmits(['start-assessment', 'submit-assessment'])
 
 const activeAssessmentId = ref('')
+const activeFilter = ref('all')
 const answerDrafts = ref({})
+const examModeAssessmentId = ref('')
+const dismissedAssessmentLaunchIds = ref([])
+const isAssessmentSubmitConfirmOpen = ref(false)
+const assessmentSubmitConfirmMode = ref('confirm')
+const isAssessmentSubmitting = ref(false)
+const assessmentSubmissionResult = ref(null)
 
 const cloneJson = (value, fallback) => {
   try {
@@ -29,6 +36,69 @@ const normalizeResponseFilled = (value) => {
   if (Array.isArray(value)) return value.length > 0
   if (value && typeof value === 'object') return Object.keys(value).length > 0
   return String(value ?? '').trim().length > 0
+}
+
+const parseAssessmentTimestamp = (value) => {
+  const parsed = typeof value === 'number' ? value : Date.parse(String(value || '').trim())
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+const formatAssessmentActivityDate = (value) => {
+  const parsed = Number(value) || parseAssessmentTimestamp(value)
+  if (!parsed) return 'Recently'
+  return new Date(parsed).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+}
+
+const getAssessmentStatusToneClass = (value) => {
+  const normalizedTone = String(value || '').trim().toLowerCase()
+  if (normalizedTone === 'success') return 'is-success'
+  if (normalizedTone === 'danger') return 'is-danger'
+  if (normalizedTone === 'warning') return 'is-warning'
+  if (normalizedTone === 'muted') return 'is-muted'
+  return 'is-info'
+}
+
+const getAssessmentAvatarInitials = (company, jobTitle) =>
+  String(company || jobTitle || 'TA')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((item) => item.charAt(0).toUpperCase())
+    .join('') || 'TA'
+
+const formatAssessmentThreadPreview = (record = {}, pendingRequiredCount = 0) => {
+  if (record?.isCancelled) {
+    return String(record?.cancellationReason || '').trim()
+      || 'This technical assessment is no longer active.'
+  }
+
+  if (record?.isSubmitted) {
+    if (record?.assessmentResult === 'passed') {
+      return `Submitted successfully. You passed with ${record.scoreLabel || 'a passing score'}.`
+    }
+
+    if (record?.assessmentResult === 'failed') {
+      return `Submitted successfully. You finished with ${record.scoreLabel || 'a recorded score'}.`
+    }
+
+    return `Submitted ${record.submittedAtLabel || 'recently'} and now locked for review.`
+  }
+
+  if (record?.isStarted) {
+    return pendingRequiredCount > 0
+      ? `${pendingRequiredCount} required question${pendingRequiredCount === 1 ? '' : 's'} still need an answer.`
+      : 'All required questions are filled. You can submit this assessment now.'
+  }
+
+  return 'This technical assessment is ready to start.'
+}
+
+const getAssessmentFilterId = (record = {}) => {
+  if (record?.isCancelled) return 'stopped'
+  if (record?.isSubmitted) return 'submitted'
+  if (record?.isStarted) return 'active'
+  return 'ready'
 }
 
 const syncDraftsFromRecords = (records) => {
@@ -71,8 +141,67 @@ watch(() => props.assessmentRecords, (records) => {
   syncDraftsFromRecords(records)
 }, { immediate: true, deep: true })
 
+const newAssessmentCount = computed(() =>
+  (Array.isArray(props.assessmentRecords) ? props.assessmentRecords : []).filter((record) =>
+    !record?.isStarted && !record?.isSubmitted && !record?.isCancelled).length,
+)
+const activeAssessmentCount = computed(() =>
+  (Array.isArray(props.assessmentRecords) ? props.assessmentRecords : []).filter((record) =>
+    record?.isStarted && !record?.isSubmitted && !record?.isCancelled).length,
+)
+const submittedAssessmentCount = computed(() =>
+  (Array.isArray(props.assessmentRecords) ? props.assessmentRecords : []).filter((record) => record?.isSubmitted).length,
+)
+const discontinuedAssessmentCount = computed(() =>
+  (Array.isArray(props.assessmentRecords) ? props.assessmentRecords : []).filter((record) => record?.isCancelled).length,
+)
+const normalizedAssessmentRecords = computed(() =>
+  (Array.isArray(props.assessmentRecords) ? props.assessmentRecords : [])
+    .map((record) => {
+      const recordId = String(record?.id || '').trim()
+      const currentResponses = recordId ? answerDrafts.value[recordId] || record?.responses || {} : record?.responses || {}
+      const pendingRequiredCount = (record?.questions || []).filter((question) =>
+        Boolean(question?.required) && !normalizeResponseFilled(currentResponses?.[question.id])).length
+      const assignedAtValue = Number(record?.assignedAtValue) || parseAssessmentTimestamp(record?.assignedAt)
+      const activityValue = Math.max(
+        assignedAtValue,
+        parseAssessmentTimestamp(record?.startedAt),
+        parseAssessmentTimestamp(record?.submittedAt),
+      )
+
+      return {
+        ...record,
+        pendingRequiredCount,
+        questionsCount: Array.isArray(record?.questions) ? record.questions.length : 0,
+        filterId: getAssessmentFilterId(record),
+        statusToneClass: getAssessmentStatusToneClass(record?.statusTone),
+        avatarInitials: getAssessmentAvatarInitials(record?.company, record?.jobTitle),
+        activityValue,
+        activityLabel: formatAssessmentActivityDate(activityValue || assignedAtValue),
+        threadPreview: formatAssessmentThreadPreview(record, pendingRequiredCount),
+      }
+    })
+    .filter((record) => record.id)
+    .sort((left, right) => (right.activityValue || 0) - (left.activityValue || 0)),
+)
+
+const filters = computed(() => [
+  { id: 'all', label: 'All', count: normalizedAssessmentRecords.value.length },
+  { id: 'ready', label: 'Ready', count: newAssessmentCount.value },
+  { id: 'active', label: 'Active', count: activeAssessmentCount.value },
+  { id: 'submitted', label: 'Submitted', count: submittedAssessmentCount.value },
+  { id: 'stopped', label: 'Closed', count: discontinuedAssessmentCount.value },
+])
+
+const filteredAssessmentRecords = computed(() =>
+  normalizedAssessmentRecords.value.filter((record) =>
+    activeFilter.value === 'all' ? true : record.filterId === activeFilter.value),
+)
+
 const activeAssessment = computed(() =>
-  props.assessmentRecords.find((record) => String(record?.id || '').trim() === String(activeAssessmentId.value || '').trim()) || null,
+  filteredAssessmentRecords.value.find((record) => String(record?.id || '').trim() === String(activeAssessmentId.value || '').trim())
+  || filteredAssessmentRecords.value[0]
+  || null,
 )
 
 const activeAssessmentDraft = computed(() => {
@@ -84,62 +213,87 @@ const activeAssessmentPendingQuestions = computed(() =>
   (activeAssessment.value?.questions || []).filter((question) =>
     Boolean(question?.required) && !normalizeResponseFilled(activeAssessmentDraft.value?.[question.id])),
 )
-const newAssessmentCount = computed(() =>
-  (Array.isArray(props.assessmentRecords) ? props.assessmentRecords : []).filter((record) =>
-    !record?.isStarted && !record?.isSubmitted && !record?.isCancelled).length,
+const isAssessmentNew = (record) =>
+  Boolean(record) && !record?.isStarted && !record?.isSubmitted && !record?.isCancelled
+
+const isActiveAssessmentLaunchDismissed = computed(() =>
+  Boolean(activeAssessment.value?.id)
+  && dismissedAssessmentLaunchIds.value.includes(String(activeAssessment.value.id || '').trim()),
 )
-const submittedAssessmentCount = computed(() =>
-  (Array.isArray(props.assessmentRecords) ? props.assessmentRecords : []).filter((record) => record?.isSubmitted).length,
+
+const showActiveAssessmentLaunchPrompt = computed(() =>
+  isAssessmentNew(activeAssessment.value)
+  && !isActiveAssessmentLaunchDismissed.value
+  && String(examModeAssessmentId.value || '').trim() !== String(activeAssessment.value?.id || '').trim(),
 )
-const discontinuedAssessmentCount = computed(() =>
-  (Array.isArray(props.assessmentRecords) ? props.assessmentRecords : []).filter((record) => record?.isCancelled).length,
-)
-const assessmentSummaryCards = computed(() => [
-  {
-    id: 'assigned',
-    label: 'Assigned',
-    value: String((Array.isArray(props.assessmentRecords) ? props.assessmentRecords : []).length),
-    copy: 'Assessments currently visible in your workspace',
-  },
-  {
-    id: 'ready',
-    label: 'Ready',
-    value: String(newAssessmentCount.value),
-    copy: 'New assessments that can be started right away',
-  },
-  {
-    id: 'submitted',
-    label: 'Submitted',
-    value: String(submittedAssessmentCount.value),
-    copy: 'Assessments already completed and sent',
-  },
-  {
-    id: 'stopped',
-    label: 'Stopped',
-    value: String(discontinuedAssessmentCount.value),
-    copy: 'Assignments discontinued or no longer active',
-  },
-])
-const activeAssessmentOverviewCards = computed(() => {
+
+const isActiveAssessmentInExamMode = computed(() => {
+  if (!activeAssessment.value || activeAssessment.value.isSubmitted || activeAssessment.value.isCancelled) return false
+  return activeAssessment.value.isStarted || String(examModeAssessmentId.value || '').trim() === String(activeAssessment.value.id || '').trim()
+})
+const activeAssessmentDetails = computed(() => {
   if (!activeAssessment.value) return []
 
-  return [
+  const record = activeAssessment.value
+  const details = [
+    {
+      id: 'assigned',
+      label: 'Assigned',
+      value: record.assignedAtLabel || 'Recently assigned',
+    },
+  ]
+
+  if (record.isSubmitted) {
+    details.push(
+      {
+        id: 'submitted-on',
+        label: 'Submitted',
+        value: record.submittedAtLabel || 'Just now',
+      },
+      {
+        id: 'result',
+        label: 'Result',
+        value: record.statusLabel || 'Submitted',
+      },
+      {
+        id: 'score',
+        label: 'Score',
+        value: record.scoreLabel || 'Pending',
+      },
+      {
+        id: 'pass-mark',
+        label: 'Pass Mark',
+        value: `${Number(record.passingScorePercent || 0)}%`,
+      },
+    )
+
+    return details
+  }
+
+  details.push(
+    {
+      id: 'status',
+      label: 'Status',
+      value: record.statusLabel || (record.isStarted ? 'In progress' : 'Ready'),
+    },
     {
       id: 'questions',
       label: 'Questions',
-      value: String(activeAssessment.value.questions.length || 0),
-    },
-    {
-      id: 'pass-mark',
-      label: 'Pass Mark',
-      value: `${Number(activeAssessment.value.passingScorePercent || 0)}%`,
+      value: String(record.questions.length || 0),
     },
     {
       id: 'required-left',
       label: 'Required Left',
-      value: String(activeAssessment.value.isSubmitted ? 0 : activeAssessmentPendingQuestions.value.length),
+      value: String(activeAssessmentPendingQuestions.value.length),
     },
-  ]
+    {
+      id: 'pass-mark',
+      label: 'Pass Mark',
+      value: `${Number(record.passingScorePercent || 0)}%`,
+    },
+  )
+
+  return details
 })
 const activeAssessmentCompletionState = computed(() => {
   if (!activeAssessment.value?.isSubmitted || activeAssessment.value?.isCancelled) return null
@@ -177,32 +331,6 @@ const activeAssessmentCompletionState = computed(() => {
     footnote: 'Your answers are now locked and saved in your application history.',
   }
 })
-const activeAssessmentCompletionCards = computed(() => {
-  if (!activeAssessment.value?.isSubmitted || activeAssessment.value?.isCancelled) return []
-
-  return [
-    {
-      id: 'submitted-on',
-      label: 'Submitted',
-      value: activeAssessment.value.submittedAtLabel || 'Just now',
-    },
-    {
-      id: 'result',
-      label: 'Result',
-      value: activeAssessment.value.statusLabel || 'Submitted',
-    },
-    {
-      id: 'score',
-      label: 'Score',
-      value: activeAssessment.value.scoreLabel || 'Pending',
-    },
-    {
-      id: 'pass-mark',
-      label: 'Pass Mark',
-      value: `${Number(activeAssessment.value.passingScorePercent || 0)}%`,
-    },
-  ]
-})
 const nextAvailableAssessment = computed(() =>
   (Array.isArray(props.assessmentRecords) ? props.assessmentRecords : []).find((record) =>
     String(record?.id || '').trim() !== String(activeAssessment.value?.id || '').trim()
@@ -210,8 +338,19 @@ const nextAvailableAssessment = computed(() =>
       && !record?.isCancelled) || null,
 )
 
+watch(filteredAssessmentRecords, (records) => {
+  const nextRecords = Array.isArray(records) ? records : []
+  if (!nextRecords.some((record) => String(record?.id || '').trim() === String(activeAssessmentId.value || '').trim())) {
+    activeAssessmentId.value = nextRecords[0]?.id || ''
+  }
+}, { immediate: true })
+
 const selectAssessment = (assessmentId) => {
-  activeAssessmentId.value = String(assessmentId || '').trim()
+  const normalizedAssessmentId = String(assessmentId || '').trim()
+  activeAssessmentId.value = normalizedAssessmentId
+  dismissedAssessmentLaunchIds.value = dismissedAssessmentLaunchIds.value.filter((id) => id !== normalizedAssessmentId)
+  assessmentSubmissionResult.value = null
+  isAssessmentSubmitConfirmOpen.value = false
 }
 
 const setAnswerValue = (questionId, value) => {
@@ -239,231 +378,251 @@ const toggleCheckboxAnswer = (questionId, optionIndex) => {
   setAnswerValue(questionId, nextValues)
 }
 
+const cancelAssessmentLaunch = () => {
+  const normalizedAssessmentId = String(activeAssessment.value?.id || '').trim()
+  if (!normalizedAssessmentId) return
+  dismissedAssessmentLaunchIds.value = [...new Set([...dismissedAssessmentLaunchIds.value, normalizedAssessmentId])]
+  examModeAssessmentId.value = ''
+}
+
 const startAssessment = () => {
   if (!activeAssessment.value?.id || activeAssessment.value?.isCancelled) return
-  emit('start-assessment', activeAssessment.value.id)
+  const normalizedAssessmentId = String(activeAssessment.value.id || '').trim()
+  activeFilter.value = 'all'
+  examModeAssessmentId.value = normalizedAssessmentId
+  emit('start-assessment', {
+    assessmentId: normalizedAssessmentId,
+    onSuccess: () => {
+      examModeAssessmentId.value = normalizedAssessmentId
+    },
+    onError: () => {
+      examModeAssessmentId.value = ''
+    },
+  })
+}
+
+const openAssessmentSubmitConfirm = () => {
+  if (!activeAssessment.value?.id || activeAssessment.value?.isSubmitted || activeAssessment.value?.isCancelled) return
+
+  assessmentSubmitConfirmMode.value = activeAssessmentPendingQuestions.value.length ? 'missing' : 'confirm'
+  isAssessmentSubmitConfirmOpen.value = true
+}
+
+const closeAssessmentSubmitConfirm = () => {
+  if (isAssessmentSubmitting.value) return
+  isAssessmentSubmitConfirmOpen.value = false
 }
 
 const submitAssessment = () => {
   if (!activeAssessment.value?.id || activeAssessment.value?.isSubmitted || activeAssessment.value?.isCancelled) return
-  if (activeAssessmentPendingQuestions.value.length) return
+  if (activeAssessmentPendingQuestions.value.length) {
+    assessmentSubmitConfirmMode.value = 'missing'
+    isAssessmentSubmitConfirmOpen.value = true
+    return
+  }
+
+  const normalizedAssessmentId = String(activeAssessment.value.id || '').trim()
+  if (!normalizedAssessmentId) return
+
+  isAssessmentSubmitConfirmOpen.value = false
+  isAssessmentSubmitting.value = true
+  activeFilter.value = 'all'
 
   emit('submit-assessment', {
-    assessmentId: activeAssessment.value.id,
+    assessmentId: normalizedAssessmentId,
     responses: cloneJson(activeAssessmentDraft.value, {}),
+    onSuccess: (payload = {}) => {
+      isAssessmentSubmitting.value = false
+      examModeAssessmentId.value = ''
+      assessmentSubmissionResult.value = {
+        assessmentId: normalizedAssessmentId,
+        tone: String(payload?.tone || '').trim() || 'success',
+        title: String(payload?.title || 'Assessment submitted').trim() || 'Assessment submitted',
+        message: String(payload?.message || '').trim() || 'Your technical assessment was submitted successfully.',
+        footnote: String(payload?.footnote || '').trim(),
+        scoreLabel: String(payload?.scoreLabel || '').trim(),
+        passMark: String(payload?.passMark || '').trim(),
+        applicationOutcome: String(payload?.applicationOutcome || '').trim(),
+      }
+    },
+    onError: () => {
+      isAssessmentSubmitting.value = false
+    },
   })
 }
 
 const getMultipleChoiceValue = (questionId) => Number(activeAssessmentDraft.value?.[questionId])
 const isCheckboxChecked = (questionId, optionIndex) =>
   Array.isArray(activeAssessmentDraft.value?.[questionId]) && activeAssessmentDraft.value[questionId].includes(optionIndex)
+
+const closeAssessmentSubmissionResult = () => {
+  assessmentSubmissionResult.value = null
+}
 </script>
 
 <template>
   <section class="applicant-technical-assessment-page">
-    <div class="applicant-technical-assessment-page__shell">
-      <aside class="applicant-technical-assessment-page__rail">
-        <article class="applicant-technical-assessment-page__summary-card">
-          <p class="applicant-technical-assessment-page__eyebrow">Technical Assessment</p>
-          <h2>Assigned Assessments</h2>
-          <p>Review each assigned technical assessment and submit your answers once you are ready.</p>
-          <div v-if="newAssessmentCount" class="applicant-technical-assessment-page__alert">
-            <i class="bi bi-bell-fill" aria-hidden="true" />
-            <span>{{ newAssessmentCount }} new assessment<span v-if="newAssessmentCount !== 1">s</span> ready to start</span>
-          </div>
+    <div v-if="!hasApplications" class="applicant-technical-assessment-page__empty">
+      <i class="bi bi-send-x" aria-hidden="true" />
+      <h2>No job applications yet</h2>
+      <p>Apply to a job first. Once a business approves your application and assigns a technical assessment, it will appear here.</p>
+    </div>
 
-          <div class="applicant-technical-assessment-page__summary-grid">
-            <article
-              v-for="item in assessmentSummaryCards"
-              :key="item.id"
-              class="applicant-technical-assessment-page__summary-item"
-            >
-              <span>{{ item.label }}</span>
-              <strong>{{ item.value }}</strong>
-              <small>{{ item.copy }}</small>
-            </article>
-          </div>
-        </article>
+    <div v-else-if="!assessmentRecords.length" class="applicant-technical-assessment-page__empty">
+      <i class="bi bi-ui-checks-grid" aria-hidden="true" />
+      <h2>No technical assessment assigned yet</h2>
+      <p>Wait for a business owner to approve your application and assign a technical assessment template.</p>
+    </div>
 
-        <div v-if="assessmentRecords.length" class="applicant-technical-assessment-page__assignment-list">
+    <div v-else class="applicant-technical-assessment-page__shell">
+      <aside class="applicant-technical-assessment-page__list-pane">
+        <div class="applicant-technical-assessment-page__filters">
           <button
-            v-for="record in assessmentRecords"
+            v-for="filter in filters"
+            :key="filter.id"
+            type="button"
+            :class="{ 'is-active': activeFilter === filter.id }"
+            @click="activeFilter = filter.id"
+          >
+            <span>{{ filter.label }}</span>
+            <strong>{{ filter.count }}</strong>
+          </button>
+        </div>
+
+        <div v-if="filteredAssessmentRecords.length" class="applicant-technical-assessment-page__threads">
+          <button
+            v-for="record in filteredAssessmentRecords"
             :key="record.id"
             type="button"
-            class="applicant-technical-assessment-page__assignment-card"
-            :class="{ 'is-active': String(activeAssessmentId || '').trim() === String(record.id || '').trim(), 'is-inactive': record.isCancelled }"
+            class="applicant-technical-assessment-page__thread"
+            :class="{ 'is-active': activeAssessment?.id === record.id }"
             @click="selectAssessment(record.id)"
           >
-            <div class="applicant-technical-assessment-page__assignment-head">
-              <strong>{{ record.jobTitle }}</strong>
-              <div class="applicant-technical-assessment-page__assignment-badges">
-                <span
-                  v-if="!record.isStarted && !record.isSubmitted && !record.isCancelled"
-                  class="applicant-technical-assessment-page__new-badge"
-                >
-                  New
-                </span>
-                <span class="applicant-technical-assessment-page__status" :class="`is-${record.statusTone}`">
-                  {{ record.statusLabel }}
-                </span>
-              </div>
-            </div>
-            <p>{{ record.company }}</p>
-            <div class="applicant-technical-assessment-page__assignment-meta">
-              <small>Assigned {{ record.assignedAtLabel }}</small>
-              <small>{{ record.questions.length }} question<span v-if="record.questions.length !== 1">s</span></small>
-              <small>Pass {{ record.passingScorePercent }}%</small>
-            </div>
+            <span class="applicant-technical-assessment-page__avatar" aria-hidden="true">{{ record.avatarInitials }}</span>
+            <span class="applicant-technical-assessment-page__thread-copy">
+              <span class="applicant-technical-assessment-page__thread-top">
+                <strong>{{ record.company }}</strong>
+                <small>{{ record.activityLabel }}</small>
+              </span>
+              <span class="applicant-technical-assessment-page__thread-subject">{{ record.jobTitle }}</span>
+              <span class="applicant-technical-assessment-page__thread-preview">{{ record.threadPreview }}</span>
+              <span class="applicant-technical-assessment-page__thread-tags">
+                <span v-if="isAssessmentNew(record)" class="applicant-technical-assessment-page__thread-tag applicant-technical-assessment-page__thread-tag--new">New</span>
+                <span>{{ record.statusLabel }}</span>
+                <span>{{ record.questionsCount }} {{ record.questionsCount === 1 ? 'Question' : 'Questions' }}</span>
+                <span>Pass {{ record.passingScorePercent }}%</span>
+              </span>
+            </span>
           </button>
+        </div>
+
+        <div v-else class="applicant-technical-assessment-page__empty applicant-technical-assessment-page__empty--inline">
+          <i class="bi bi-search" aria-hidden="true" />
+          <h2>No matching assessments</h2>
+          <p>Try another filter. Your assessment threads update here automatically.</p>
         </div>
       </aside>
 
-      <article class="applicant-technical-assessment-page__panel">
-        <div v-if="!hasApplications" class="applicant-technical-assessment-page__empty">
-          <i class="bi bi-send-x" aria-hidden="true" />
-          <h3>No job applications yet</h3>
-          <p>Apply to a job first. Once a business approves your application and assigns an assessment, it will appear here.</p>
-        </div>
+      <section class="applicant-technical-assessment-page__viewer">
+        <article v-if="activeAssessment" class="applicant-technical-assessment-page__message">
+          <div class="applicant-technical-assessment-page__badges">
+            <span class="badge">Technical Assessment</span>
+            <span class="badge" :class="activeAssessment.statusToneClass">{{ activeAssessment.statusLabel }}</span>
+            <span class="badge muted">Pass {{ activeAssessment.passingScorePercent }}%</span>
+          </div>
 
-        <div v-else-if="!assessmentRecords.length" class="applicant-technical-assessment-page__empty">
-          <i class="bi bi-ui-checks-grid" aria-hidden="true" />
-          <h3>No technical assessment assigned yet</h3>
-          <p>Wait for a business owner to approve your application and assign a technical assessment template.</p>
-        </div>
-
-        <div
-          v-else-if="activeAssessment"
-          class="applicant-technical-assessment-page__workspace"
-          :class="{ 'is-inactive': activeAssessment.isCancelled }"
-        >
-          <section class="applicant-technical-assessment-page__hero-card">
-            <header class="applicant-technical-assessment-page__header">
-              <div class="applicant-technical-assessment-page__header-copy">
-                <p class="applicant-technical-assessment-page__eyebrow">Assessment Details</p>
-                <h3>{{ activeAssessment.title }}</h3>
-                <p>{{ activeAssessment.company }} &middot; {{ activeAssessment.jobTitle }}</p>
+          <header class="applicant-technical-assessment-page__message-head">
+            <h2>{{ activeAssessment.title }}</h2>
+            <div class="applicant-technical-assessment-page__sender">
+              <span class="applicant-technical-assessment-page__avatar" aria-hidden="true">{{ activeAssessment.avatarInitials }}</span>
+              <div>
+                <strong>{{ activeAssessment.company }}</strong>
+                <span>{{ activeAssessment.jobTitle }}</span>
               </div>
-              <span class="applicant-technical-assessment-page__status applicant-technical-assessment-page__status--large" :class="`is-${activeAssessment.statusTone}`">
-                {{ activeAssessment.statusLabel }}
-              </span>
-            </header>
+              <time>{{ activeAssessment.submittedAtLabel || activeAssessment.assignedAtLabel || activeAssessment.activityLabel }}</time>
+            </div>
+          </header>
 
+          <div class="applicant-technical-assessment-page__body">
+            <p>{{ activeAssessment.company }} assigned this technical assessment for {{ activeAssessment.jobTitle }}.</p>
+            <p>{{ activeAssessment.description || 'No extra description was added for this technical assessment.' }}</p>
+          </div>
+
+          <div class="applicant-technical-assessment-page__details">
             <div
-              v-if="activeAssessment.isCancelled"
-              class="applicant-technical-assessment-page__alert applicant-technical-assessment-page__alert--inline applicant-technical-assessment-page__alert--danger"
+              v-for="item in activeAssessmentDetails"
+              :key="item.id"
+              class="applicant-technical-assessment-page__detail"
             >
-              <i class="bi bi-slash-circle" aria-hidden="true" />
-              <span>{{ activeAssessment.cancellationReason || 'This technical assessment was discontinued because the job post was deleted.' }}</span>
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
             </div>
+          </div>
 
-            <div
-              v-else-if="!activeAssessment.isStarted && !activeAssessment.isSubmitted"
-              class="applicant-technical-assessment-page__alert applicant-technical-assessment-page__alert--inline"
-            >
-              <i class="bi bi-stars" aria-hidden="true" />
-              <span>This technical assessment is new and ready to start.</span>
-            </div>
-
-            <div class="applicant-technical-assessment-page__meta">
-              <span>Assigned {{ activeAssessment.assignedAtLabel }}</span>
-              <span v-if="activeAssessment.submittedAtLabel">Submitted {{ activeAssessment.submittedAtLabel }}</span>
-              <span>{{ activeAssessment.questions.length }} {{ activeAssessment.questions.length === 1 ? 'question' : 'questions' }}</span>
-            </div>
-
-            <div class="applicant-technical-assessment-page__overview-grid">
-              <article
-                v-for="item in activeAssessmentOverviewCards"
-                :key="item.id"
-                class="applicant-technical-assessment-page__overview-item"
-              >
-                <span>{{ item.label }}</span>
-                <strong>{{ item.value }}</strong>
-              </article>
-            </div>
+          <section class="applicant-technical-assessment-page__instruction">
+            <span>Instructions</span>
+            <p>{{ activeAssessment.instructions || 'Read each question carefully before submitting your assessment.' }}</p>
           </section>
 
-          <section
-            v-if="!activeAssessment.isSubmitted"
-            class="applicant-technical-assessment-page__intro-card"
-          >
-            <p v-if="activeAssessment.description">{{ activeAssessment.description }}</p>
-            <p v-else class="applicant-technical-assessment-page__muted">No extra description was added for this technical assessment.</p>
+          <div v-if="activeAssessment.isCancelled" class="applicant-technical-assessment-page__box danger">
+            <strong>Assessment closed</strong>
+            <span>{{ activeAssessment.cancellationReason || 'This technical assessment was discontinued because the job post was deleted.' }}</span>
+          </div>
 
-            <div class="applicant-technical-assessment-page__instructions">
-              <strong>Instructions</strong>
-              <p v-if="activeAssessment.instructions">{{ activeAssessment.instructions }}</p>
-              <p v-else class="applicant-technical-assessment-page__muted">Read each question carefully before submitting your assessment.</p>
-            </div>
-
-            <button
-              v-if="!activeAssessment.isStarted && !activeAssessment.isSubmitted && !activeAssessment.isCancelled"
-              type="button"
-              class="applicant-technical-assessment-page__primary"
-              @click="startAssessment"
-            >
-              Ready to Start
-            </button>
-          </section>
-
-          <section
+          <div
             v-else-if="activeAssessmentCompletionState"
-            class="applicant-technical-assessment-page__completion-card"
-            :class="`is-${activeAssessmentCompletionState.tone}`"
+            class="applicant-technical-assessment-page__box"
+            :class="activeAssessmentCompletionState.tone === 'warning' ? 'warning' : 'success'"
           >
-            <div class="applicant-technical-assessment-page__completion-hero">
-              <div class="applicant-technical-assessment-page__completion-icon" aria-hidden="true">
-                <i :class="activeAssessmentCompletionState.icon" />
-              </div>
+            <strong>{{ activeAssessmentCompletionState.title }}</strong>
+            <span>{{ activeAssessmentCompletionState.message }}</span>
+            <span>{{ activeAssessmentCompletionState.footnote }}</span>
+          </div>
 
-              <div class="applicant-technical-assessment-page__completion-copy">
-                <p class="applicant-technical-assessment-page__eyebrow">Assessment Completed</p>
-                <h4>{{ activeAssessmentCompletionState.title }}</h4>
-                <p>{{ activeAssessmentCompletionState.message }}</p>
-              </div>
-            </div>
+          <div v-else-if="!showActiveAssessmentLaunchPrompt || isActiveAssessmentInExamMode" class="applicant-technical-assessment-page__box">
+            <strong>{{ isActiveAssessmentInExamMode ? 'Assessment in progress' : 'Assessment ready' }}</strong>
+            <span v-if="isActiveAssessmentInExamMode && activeAssessmentPendingQuestions.length">
+              You still need to answer {{ activeAssessmentPendingQuestions.length }} required question<span v-if="activeAssessmentPendingQuestions.length !== 1">s</span>.
+            </span>
+            <span v-else-if="isActiveAssessmentInExamMode">
+              All required questions are answered. You can submit this assessment now.
+            </span>
+            <span v-else>
+              This assessment is waiting for your answers. Start when you're ready.
+            </span>
+          </div>
 
-            <div class="applicant-technical-assessment-page__completion-grid">
-              <article
-                v-for="item in activeAssessmentCompletionCards"
-                :key="item.id"
-                class="applicant-technical-assessment-page__completion-item"
-              >
-                <span>{{ item.label }}</span>
-                <strong>{{ item.value }}</strong>
-              </article>
-            </div>
-
-            <div class="applicant-technical-assessment-page__completion-footer">
-              <p class="applicant-technical-assessment-page__success">
-                {{ activeAssessmentCompletionState.footnote }}
-              </p>
-
-              <button
-                v-if="nextAvailableAssessment"
-                type="button"
-                class="applicant-technical-assessment-page__secondary"
-                @click="selectAssessment(nextAvailableAssessment.id)"
-              >
-                Open Next Assessment
+          <div
+            v-if="showActiveAssessmentLaunchPrompt"
+            class="applicant-technical-assessment-page__launch"
+          >
+            <strong>New technical assessment</strong>
+            <span>Review the instructions first, then continue to enter technical exam mode.</span>
+            <div class="applicant-technical-assessment-page__actions applicant-technical-assessment-page__actions--launch">
+              <button type="button" @click="cancelAssessmentLaunch">
+                Cancel
+              </button>
+              <button type="button" class="primary" @click="startAssessment">
+                Continue
               </button>
             </div>
-          </section>
+          </div>
 
           <section
-            v-if="activeAssessment.isStarted && !activeAssessment.isSubmitted && !activeAssessment.isCancelled"
-            class="applicant-technical-assessment-page__form"
+            v-if="isActiveAssessmentInExamMode && !activeAssessment.isSubmitted && !activeAssessment.isCancelled"
+            class="applicant-technical-assessment-page__question-list"
           >
             <article
               v-for="(question, index) in activeAssessment.questions"
               :key="question.id || `${activeAssessment.id}-question-${index}`"
-              class="applicant-technical-assessment-page__question"
+              class="applicant-technical-assessment-page__question-card"
             >
               <div class="applicant-technical-assessment-page__question-head">
                 <strong>Question {{ index + 1 }}</strong>
                 <span v-if="question.required">Required</span>
               </div>
 
-              <h4>{{ question.label || `Question ${index + 1}` }}</h4>
+              <h3>{{ question.label || `Question ${index + 1}` }}</h3>
               <p v-if="question.helpText">{{ question.helpText }}</p>
 
               <input
@@ -471,7 +630,6 @@ const isCheckboxChecked = (questionId, optionIndex) =>
                 :value="activeAssessmentDraft[question.id] || ''"
                 type="text"
                 class="applicant-technical-assessment-page__input"
-                :readonly="activeAssessment.isSubmitted"
                 placeholder="Enter your answer"
                 @input="setAnswerValue(question.id, $event.target.value)"
               />
@@ -481,7 +639,6 @@ const isCheckboxChecked = (questionId, optionIndex) =>
                 :value="activeAssessmentDraft[question.id] || ''"
                 rows="5"
                 class="applicant-technical-assessment-page__textarea"
-                :readonly="activeAssessment.isSubmitted"
                 placeholder="Write your answer"
                 @input="setAnswerValue(question.id, $event.target.value)"
               />
@@ -499,7 +656,6 @@ const isCheckboxChecked = (questionId, optionIndex) =>
                     type="radio"
                     :name="`${activeAssessment.id}-${question.id}`"
                     :checked="getMultipleChoiceValue(question.id) === optionIndex"
-                    :disabled="activeAssessment.isSubmitted"
                     @change="setAnswerValue(question.id, optionIndex)"
                   />
                   <span>{{ option || `Option ${optionIndex + 1}` }}</span>
@@ -518,7 +674,6 @@ const isCheckboxChecked = (questionId, optionIndex) =>
                   <input
                     type="checkbox"
                     :checked="isCheckboxChecked(question.id, optionIndex)"
-                    :disabled="activeAssessment.isSubmitted"
                     @change="toggleCheckboxAnswer(question.id, optionIndex)"
                   />
                   <span>{{ option || `Option ${optionIndex + 1}` }}</span>
@@ -535,7 +690,6 @@ const isCheckboxChecked = (questionId, optionIndex) =>
                   type="button"
                   class="applicant-technical-assessment-page__rating-option"
                   :class="{ 'is-selected': String(activeAssessmentDraft[question.id] || '') === String(option) }"
-                  :disabled="activeAssessment.isSubmitted"
                   @click="setAnswerValue(question.id, option)"
                 >
                   {{ option }}
@@ -543,674 +697,204 @@ const isCheckboxChecked = (questionId, optionIndex) =>
               </div>
             </article>
 
-            <div class="applicant-technical-assessment-page__footer">
+            <div class="applicant-technical-assessment-page__actions applicant-technical-assessment-page__actions--footer">
               <p v-if="activeAssessmentPendingQuestions.length" class="applicant-technical-assessment-page__warning">
                 Complete all required questions before submitting this assessment.
               </p>
-
               <button
                 type="button"
-                class="applicant-technical-assessment-page__primary"
-                :disabled="activeAssessmentPendingQuestions.length > 0"
-                @click="submitAssessment"
+                class="primary"
+                @click="openAssessmentSubmitConfirm"
               >
                 Submit Assessment
               </button>
             </div>
           </section>
+
+          <div
+            v-if="activeAssessment.isSubmitted && nextAvailableAssessment"
+            class="applicant-technical-assessment-page__actions"
+          >
+            <button type="button" @click="activeFilter = 'all'; selectAssessment(nextAvailableAssessment.id)">
+              Open Next Assessment
+            </button>
+          </div>
+        </article>
+
+        <div v-else class="applicant-technical-assessment-page__empty applicant-technical-assessment-page__empty--inline">
+          <i class="bi bi-envelope-open" aria-hidden="true" />
+          <h2>Select an assessment</h2>
+          <p>Choose an assessment thread from the left side to review the questions and employer instructions.</p>
         </div>
-      </article>
+      </section>
+    </div>
+
+    <div v-if="isAssessmentSubmitConfirmOpen" class="applicant-technical-assessment-page__modal-backdrop">
+      <div class="applicant-technical-assessment-page__modal">
+        <span class="applicant-technical-assessment-page__modal-label">
+          {{ assessmentSubmitConfirmMode === 'missing' ? 'Incomplete answers' : 'Submit assessment' }}
+        </span>
+        <h3>
+          {{ assessmentSubmitConfirmMode === 'missing' ? 'Complete the required questions first' : 'Are you ready to complete this technical exam?' }}
+        </h3>
+        <p v-if="assessmentSubmitConfirmMode === 'missing'">
+          You still need to answer {{ activeAssessmentPendingQuestions.length }} required question<span v-if="activeAssessmentPendingQuestions.length !== 1">s</span> before submitting.
+        </p>
+        <p v-else>
+          Once you submit this assessment, your answers will be locked and scored immediately.
+        </p>
+
+        <div class="applicant-technical-assessment-page__modal-actions">
+          <button type="button" @click="closeAssessmentSubmitConfirm">
+            {{ assessmentSubmitConfirmMode === 'missing' ? 'Back to questions' : 'Cancel' }}
+          </button>
+          <button
+            v-if="assessmentSubmitConfirmMode !== 'missing'"
+            type="button"
+            class="primary"
+            @click="submitAssessment"
+          >
+            Yes, Submit
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="isAssessmentSubmitting" class="applicant-technical-assessment-page__loading-backdrop">
+      <div class="applicant-technical-assessment-page__loading-card">
+        <span class="applicant-technical-assessment-page__spinner" aria-hidden="true" />
+        <strong>Submitting technical assessment</strong>
+        <p>Please wait while we score your answers and update your application.</p>
+      </div>
+    </div>
+
+    <div v-if="assessmentSubmissionResult" class="applicant-technical-assessment-page__modal-backdrop">
+      <div class="applicant-technical-assessment-page__modal applicant-technical-assessment-page__modal--result">
+        <span
+          class="applicant-technical-assessment-page__result-pill"
+          :class="assessmentSubmissionResult.tone === 'danger' ? 'is-danger' : 'is-success'"
+        >
+          {{ assessmentSubmissionResult.tone === 'danger' ? 'Failed' : 'Passed' }}
+        </span>
+        <h3>{{ assessmentSubmissionResult.title }}</h3>
+        <p>{{ assessmentSubmissionResult.message }}</p>
+        <p v-if="assessmentSubmissionResult.footnote" class="applicant-technical-assessment-page__result-footnote">
+          {{ assessmentSubmissionResult.footnote }}
+        </p>
+        <div class="applicant-technical-assessment-page__result-summary">
+          <div v-if="assessmentSubmissionResult.scoreLabel" class="applicant-technical-assessment-page__detail">
+            <span>Score</span>
+            <strong>{{ assessmentSubmissionResult.scoreLabel }}</strong>
+          </div>
+          <div v-if="assessmentSubmissionResult.passMark" class="applicant-technical-assessment-page__detail">
+            <span>Pass Mark</span>
+            <strong>{{ assessmentSubmissionResult.passMark }}</strong>
+          </div>
+          <div
+            v-if="assessmentSubmissionResult.applicationOutcome === 'rejected'"
+            class="applicant-technical-assessment-page__detail applicant-technical-assessment-page__detail--danger"
+          >
+            <span>Application Status</span>
+            <strong>Failed</strong>
+          </div>
+        </div>
+        <div class="applicant-technical-assessment-page__modal-actions">
+          <button type="button" class="primary" @click="closeAssessmentSubmissionResult">
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   </section>
 </template>
 
 <style scoped>
-.applicant-technical-assessment-page {
-  width: 100%;
-  min-height: calc(100vh - 9rem);
-  padding: 0 1.25rem;
-}
-
-.applicant-technical-assessment-page__shell {
-  display: grid;
-  grid-template-columns: 18rem minmax(0, 1fr);
-  gap: 1.15rem;
-  align-items: start;
-}
-
-.applicant-technical-assessment-page__rail {
-  display: grid;
-  gap: 0.95rem;
-  align-content: start;
-}
-
-.applicant-technical-assessment-page__summary-card,
-.applicant-technical-assessment-page__panel {
-  border: 1px solid rgba(112, 168, 136, 0.16);
-  border-radius: 1.12rem;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(244, 251, 247, 0.94) 100%);
-  box-shadow:
-    0 16px 36px rgba(79, 129, 102, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.92);
-}
-
-.applicant-technical-assessment-page__summary-card {
-  display: grid;
-  gap: 0.95rem;
-  padding: 1.15rem 1.2rem;
-}
-
-.applicant-technical-assessment-page__panel {
-  min-height: calc(100vh - 10.5rem);
-  padding: 1.15rem 1.2rem;
-}
-
-.applicant-technical-assessment-page__hero-card {
-  display: grid;
-  gap: 0.95rem;
-  padding: 1.1rem 1.1rem 1rem;
-  border: 1px solid rgba(126, 173, 148, 0.2);
-  border-radius: 1.15rem;
-  background:
-    radial-gradient(circle at top right, rgba(208, 241, 221, 0.5), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(245, 251, 247, 0.98) 100%);
-  box-shadow:
-    0 18px 36px rgba(79, 129, 102, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.95);
-}
-
-.applicant-technical-assessment-page__eyebrow {
-  margin: 0;
-  color: #4e7b63;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.applicant-technical-assessment-page__summary-card h2,
-.applicant-technical-assessment-page__header h3,
-.applicant-technical-assessment-page__empty h3,
-.applicant-technical-assessment-page__question h4 {
-  margin: 0.28rem 0 0;
-  color: #172033;
-}
-
-.applicant-technical-assessment-page__summary-card p,
-.applicant-technical-assessment-page__header p,
-.applicant-technical-assessment-page__empty p,
-.applicant-technical-assessment-page__intro-card p,
-.applicant-technical-assessment-page__completion-copy p,
-.applicant-technical-assessment-page__question p {
-  margin: 0.32rem 0 0;
-  color: #64748b;
-  line-height: 1.6;
-}
-
-.applicant-technical-assessment-page__summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.8rem;
-}
-
-.applicant-technical-assessment-page__summary-item,
-.applicant-technical-assessment-page__overview-item,
-.applicant-technical-assessment-page__intro-card,
-.applicant-technical-assessment-page__completion-card,
-.applicant-technical-assessment-page__question,
-.applicant-technical-assessment-page__assignment-card {
-  border: 1px solid rgba(205, 216, 226, 0.92);
-  border-radius: 1rem;
-  background: #ffffff;
-  box-shadow:
-    0 1px 0 rgba(15, 23, 42, 0.03),
-    0 14px 28px rgba(15, 23, 42, 0.06);
-}
-
-.applicant-technical-assessment-page__summary-item {
-  display: grid;
-  gap: 0.2rem;
-  padding: 0.9rem 0.95rem;
-}
-
-.applicant-technical-assessment-page__summary-item span,
-.applicant-technical-assessment-page__overview-item span {
-  color: #64748b;
-  font-size: 0.71rem;
-  font-weight: 700;
-}
-
-.applicant-technical-assessment-page__summary-item strong,
-.applicant-technical-assessment-page__overview-item strong {
-  color: #111827;
-  font-size: 1.22rem;
-  font-weight: 800;
-  letter-spacing: -0.04em;
-}
-
-.applicant-technical-assessment-page__overview-item strong {
-  font-size: 1.5rem;
-  line-height: 1;
-}
-
-.applicant-technical-assessment-page__summary-item small {
-  color: #6b7280;
-  font-size: 0.68rem;
-  line-height: 1.45;
-}
-
-.applicant-technical-assessment-page__assignment-list {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.applicant-technical-assessment-page__assignment-card {
-  display: grid;
-  gap: 0.48rem;
-  padding: 0.95rem 1rem;
-  text-align: left;
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-}
-
-.applicant-technical-assessment-page__assignment-card.is-active {
-  border-color: rgba(47, 106, 73, 0.4);
-  box-shadow:
-    0 18px 34px rgba(15, 23, 42, 0.1),
-    0 6px 14px rgba(52, 109, 78, 0.06);
-  transform: translateY(-2px);
-}
-
-.applicant-technical-assessment-page__assignment-card.is-inactive {
-  border-color: rgba(203, 213, 225, 0.7);
-  background: linear-gradient(180deg, #fbfcfb 0%, #f7f9f8 100%);
-}
-
-.applicant-technical-assessment-page__assignment-card:hover {
-  border-color: rgba(47, 106, 73, 0.28);
-  transform: translateY(-1px);
-}
-
-.applicant-technical-assessment-page__assignment-head,
-.applicant-technical-assessment-page__header,
-.applicant-technical-assessment-page__question-head,
-.applicant-technical-assessment-page__footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.85rem;
-}
-
-.applicant-technical-assessment-page__assignment-head strong,
-.applicant-technical-assessment-page__question-head strong {
-  color: #172033;
-}
-
-.applicant-technical-assessment-page__header {
-  align-items: flex-start;
-}
-
-.applicant-technical-assessment-page__header-copy {
-  display: grid;
-  gap: 0.22rem;
-}
-
-.applicant-technical-assessment-page__assignment-badges {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.applicant-technical-assessment-page__assignment-card p {
-  margin: 0;
-  color: #475569;
-  font-size: 0.8rem;
-}
-
-.applicant-technical-assessment-page__assignment-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem 0.7rem;
-}
-
-.applicant-technical-assessment-page__assignment-meta small,
-.applicant-technical-assessment-page__meta {
-  color: #708179;
-  font-size: 0.74rem;
-}
-
-.applicant-technical-assessment-page__workspace,
-.applicant-technical-assessment-page__form {
-  display: grid;
-  gap: 0.95rem;
-}
-
-.applicant-technical-assessment-page__workspace.is-inactive .applicant-technical-assessment-page__intro-card,
-.applicant-technical-assessment-page__workspace.is-inactive .applicant-technical-assessment-page__question {
-  background: #fafbf9;
-}
-
-.applicant-technical-assessment-page__meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.65rem;
-}
-
-.applicant-technical-assessment-page__meta > span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 2rem;
-  padding: 0 0.8rem;
-  border: 1px solid rgba(205, 216, 226, 0.88);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.88);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92);
-}
-
-.applicant-technical-assessment-page__overview-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(9.75rem, 11.5rem));
-  gap: 0.75rem;
-  justify-content: start;
-}
-
-.applicant-technical-assessment-page__overview-item {
-  display: grid;
-  gap: 0.18rem;
-  min-height: 5.25rem;
-  padding: 0.8rem 0.9rem;
-  border-color: rgba(191, 219, 204, 0.88);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 252, 250, 0.96) 100%);
-}
-
-.applicant-technical-assessment-page__intro-card,
-.applicant-technical-assessment-page__completion-card,
-.applicant-technical-assessment-page__question {
-  display: grid;
-  gap: 0.85rem;
-  padding: 1rem 1.05rem;
-}
-
-.applicant-technical-assessment-page__completion-card {
-  gap: 0.82rem;
-  padding: 0.88rem 0.95rem;
-  border-color: rgba(134, 239, 172, 0.36);
-  background:
-    radial-gradient(circle at top right, rgba(240, 253, 244, 0.95), transparent 38%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(247, 253, 249, 0.98) 100%);
-}
-
-.applicant-technical-assessment-page__completion-card.is-warning {
-  border-color: rgba(251, 191, 36, 0.32);
-  background:
-    radial-gradient(circle at top right, rgba(255, 251, 235, 0.98), transparent 38%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(255, 251, 235, 0.92) 100%);
-}
-
-.applicant-technical-assessment-page__completion-hero {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.82rem;
-  align-items: start;
-}
-
-.applicant-technical-assessment-page__completion-icon {
-  width: 2.95rem;
-  height: 2.95rem;
-  display: grid;
-  place-items: center;
-  border-radius: 0.9rem;
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.16) 0%, rgba(187, 247, 208, 0.3) 100%);
-  color: #15803d;
-  font-size: 1.02rem;
-}
-
-.applicant-technical-assessment-page__completion-card.is-warning .applicant-technical-assessment-page__completion-icon {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.14) 0%, rgba(254, 240, 138, 0.24) 100%);
-  color: #b45309;
-}
-
-.applicant-technical-assessment-page__completion-copy {
-  display: grid;
-  gap: 0.22rem;
-}
-
-.applicant-technical-assessment-page__completion-copy h4 {
-  margin: 0;
-  color: #172033;
-  font-size: 1.06rem;
-  font-weight: 700;
-}
-
-.applicant-technical-assessment-page__completion-copy p:last-child {
-  margin-top: 0;
-}
-
-.applicant-technical-assessment-page__completion-copy p {
-  font-size: 0.94rem;
-  font-weight: 500;
-  line-height: 1.5;
-}
-
-.applicant-technical-assessment-page__completion-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.65rem;
-}
-
-.applicant-technical-assessment-page__completion-item {
-  display: grid;
-  gap: 0.22rem;
-  min-height: 4.35rem;
-  padding: 0.7rem 0.82rem;
-  border: 1px solid rgba(221, 231, 225, 0.92);
-  border-radius: 0.92rem;
-  background: rgba(255, 255, 255, 0.88);
-}
-
-.applicant-technical-assessment-page__completion-item span {
-  color: #64748b;
-  font-size: 0.64rem;
-  font-weight: 700;
-}
-
-.applicant-technical-assessment-page__completion-item strong {
-  color: #0f172a;
-  font-size: 0.96rem;
-  font-weight: 700;
-}
-
-.applicant-technical-assessment-page__completion-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.72rem;
-  flex-wrap: wrap;
-}
-
-.applicant-technical-assessment-page__completion-footer .applicant-technical-assessment-page__success {
-  margin: 0;
-  font-size: 0.96rem;
-  font-weight: 600;
-  line-height: 1.45;
-}
-
-.applicant-technical-assessment-page__alert {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.72rem 0.9rem;
-  border: 1px solid rgba(253, 186, 116, 0.36);
-  border-radius: 0.95rem;
-  background: rgba(255, 247, 237, 0.96);
-  color: #b45309;
-  font-size: 0.82rem;
-  font-weight: 700;
-}
-
-.applicant-technical-assessment-page__alert--inline {
-  margin-top: 0;
-  width: fit-content;
-  max-width: 100%;
-}
-
-.applicant-technical-assessment-page__alert--danger {
-  border-color: rgba(248, 113, 113, 0.3);
-  background: rgba(254, 242, 242, 0.94);
-  color: #b42318;
-}
-
-.applicant-technical-assessment-page__instructions {
-  display: grid;
-  gap: 0.35rem;
-}
-
-.applicant-technical-assessment-page__instructions strong {
-  color: #172033;
-}
-
-.applicant-technical-assessment-page__input,
-.applicant-technical-assessment-page__textarea {
-  width: 100%;
-  min-height: 2.9rem;
-  border: 1px solid rgba(205, 216, 226, 0.92);
-  border-radius: 0.95rem;
-  background: #fcfdfd;
-  padding: 0.85rem 0.95rem;
-  font: inherit;
-  color: #213028;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
-}
-
-.applicant-technical-assessment-page__textarea {
-  min-height: 8rem;
-  resize: vertical;
-}
-
-.applicant-technical-assessment-page__input:focus,
-.applicant-technical-assessment-page__textarea:focus {
-  outline: none;
-  border-color: rgba(47, 106, 73, 0.32);
-  box-shadow: 0 0 0 4px rgba(47, 106, 73, 0.08);
-  background: #ffffff;
-}
-
-.applicant-technical-assessment-page__choices {
-  display: grid;
-  gap: 0.65rem;
-}
-
-.applicant-technical-assessment-page__choice {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.7rem;
-  border: 1px solid rgba(221, 231, 225, 0.92);
-  border-radius: 0.95rem;
-  background: #fbfcfc;
-  padding: 0.8rem 0.9rem;
-  color: #334155;
-}
-
-.applicant-technical-assessment-page__choice input {
-  margin-top: 0.16rem;
-}
-
-.applicant-technical-assessment-page__rating {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-}
-
-.applicant-technical-assessment-page__secondary,
-.applicant-technical-assessment-page__rating-option,
-.applicant-technical-assessment-page__primary {
-  min-height: 2.75rem;
-  border: 1px solid rgba(205, 216, 226, 0.92);
-  border-radius: 0.95rem;
-  background: #ffffff;
-  color: #24583d;
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
-}
-
-.applicant-technical-assessment-page__rating-option {
-  min-width: 2.75rem;
-  padding: 0 1rem;
-}
-
-.applicant-technical-assessment-page__secondary {
-  padding: 0 1rem;
-  color: #24583d;
-}
-
-.applicant-technical-assessment-page__rating-option.is-selected,
-.applicant-technical-assessment-page__primary {
-  background: linear-gradient(135deg, #2f6a49 0%, #4f8c67 100%);
-  border-color: transparent;
-  color: #ffffff;
-  box-shadow: 0 12px 24px rgba(47, 106, 73, 0.18);
-}
-
-.applicant-technical-assessment-page__primary {
-  padding: 0 1rem;
-}
-
-.applicant-technical-assessment-page__rating-option:hover,
-.applicant-technical-assessment-page__secondary:hover,
-.applicant-technical-assessment-page__primary:hover {
-  transform: translateY(-1px);
-}
-
-.applicant-technical-assessment-page__primary:disabled {
-  opacity: 0.58;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-.applicant-technical-assessment-page__status {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 2rem;
-  padding: 0 0.8rem;
-  border-radius: 999px;
-  font-size: 0.74rem;
-  font-weight: 800;
-  white-space: nowrap;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
-}
-
-.applicant-technical-assessment-page__new-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 1.8rem;
-  padding: 0 0.7rem;
-  border-radius: 999px;
-  background: #dc2626;
-  color: #ffffff;
-  font-size: 0.7rem;
-  font-weight: 800;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-.applicant-technical-assessment-page__status.is-warning {
-  background: rgba(255, 244, 221, 0.98);
-  color: #9a6700;
-}
-
-.applicant-technical-assessment-page__status.is-accent {
-  background: rgba(230, 241, 255, 0.98);
-  color: #1d4ed8;
-}
-
-.applicant-technical-assessment-page__status.is-success {
-  background: rgba(218, 244, 225, 0.96);
-  color: #1f7a45;
-}
-
-.applicant-technical-assessment-page__status.is-danger {
-  background: rgba(254, 226, 226, 0.98);
-  color: #b42318;
-}
-
-.applicant-technical-assessment-page__status.is-muted {
-  background: rgba(241, 245, 249, 0.98);
-  color: #475569;
-}
-
-.applicant-technical-assessment-page__status--large {
-  min-height: 2.3rem;
-  padding-inline: 0.95rem;
-  border: 1px solid rgba(255, 255, 255, 0.42);
-  box-shadow:
-    0 12px 22px rgba(15, 23, 42, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.68);
-}
-
-.applicant-technical-assessment-page__warning {
-  color: #b45309;
-  font-weight: 700;
-}
-
-.applicant-technical-assessment-page__success {
-  color: #047857;
-  font-weight: 700;
-}
-
-.applicant-technical-assessment-page__muted {
-  color: #7b8a83;
-}
-
-.applicant-technical-assessment-page__empty {
-  min-height: calc(100vh - 12rem);
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 0.65rem;
-  text-align: center;
-}
-
-.applicant-technical-assessment-page__empty i {
-  font-size: 2rem;
-  color: #2f6f49;
-}
-
-@media (max-width: 1080px) {
-  .applicant-technical-assessment-page__shell {
-    grid-template-columns: 1fr;
-  }
-
-  .applicant-technical-assessment-page__summary-grid,
-  .applicant-technical-assessment-page__completion-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .applicant-technical-assessment-page__overview-grid {
-    grid-template-columns: repeat(2, minmax(9.5rem, 11.5rem));
-  }
-
-  .applicant-technical-assessment-page__panel {
-    min-height: auto;
-  }
-}
-
-@media (max-width: 720px) {
-  .applicant-technical-assessment-page {
-    padding: 0 0.85rem;
-  }
-
-  .applicant-technical-assessment-page__summary-grid,
-  .applicant-technical-assessment-page__completion-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .applicant-technical-assessment-page__hero-card {
-    padding: 0.95rem;
-  }
-
-  .applicant-technical-assessment-page__overview-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .applicant-technical-assessment-page__header,
-  .applicant-technical-assessment-page__question-head,
-  .applicant-technical-assessment-page__footer,
-  .applicant-technical-assessment-page__completion-footer {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .applicant-technical-assessment-page__completion-hero {
-    grid-template-columns: 1fr;
-  }
-}
+.applicant-technical-assessment-page{display:grid;gap:1.25rem;padding:0 1.25rem;width:100%;min-height:min(46rem,calc(100vh - 8.75rem))}
+.applicant-technical-assessment-page__list-pane,.applicant-technical-assessment-page__viewer{border:1px solid rgba(66,112,87,.18);background:rgba(255,255,255,.97);box-shadow:0 18px 36px rgba(31,74,51,.07)}
+.applicant-technical-assessment-page__shell{display:grid;grid-template-columns:minmax(19rem,26rem) minmax(0,1fr);gap:1.2rem;min-height:0}
+.applicant-technical-assessment-page__list-pane{display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden}
+.applicant-technical-assessment-page__filters{display:flex;flex-wrap:wrap;gap:.6rem;padding:1rem;border-bottom:1px solid rgba(83,128,98,.14);background:linear-gradient(180deg,rgba(247,252,249,.95),rgba(255,255,255,.95))}
+.applicant-technical-assessment-page__filters button,.applicant-technical-assessment-page__actions button,.applicant-technical-assessment-page__rating-option{display:inline-flex;align-items:center;justify-content:center;gap:.55rem;padding:.72rem .92rem;border:1px solid rgba(83,128,98,.18);background:#fff;color:#355745;font:inherit;font-weight:700;cursor:pointer;transition:background-color .18s ease,border-color .18s ease,transform .18s ease,opacity .18s ease}
+.applicant-technical-assessment-page__filters button.is-active{border-color:rgba(31,122,82,.4);background:rgba(224,243,232,.94);color:#18412c}
+.applicant-technical-assessment-page__threads{display:grid;grid-auto-rows:max-content;align-content:start;overflow-y:auto}
+.applicant-technical-assessment-page__thread{display:grid;grid-template-columns:auto minmax(0,1fr);align-content:start;gap:.85rem;padding:1rem;border:0;border-bottom:1px solid rgba(83,128,98,.12);background:transparent;text-align:left;cursor:pointer}
+.applicant-technical-assessment-page__thread.is-active{background:linear-gradient(90deg,rgba(216,242,226,.92),rgba(255,255,255,.98));box-shadow:inset 4px 0 0 #2d9360}
+.applicant-technical-assessment-page__avatar{display:inline-grid;place-items:center;width:2.8rem;aspect-ratio:1;border:1px solid rgba(83,128,98,.18);background:linear-gradient(135deg,rgba(225,243,233,.95),rgba(247,252,249,.96));color:#1c5138;font-size:.86rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
+.applicant-technical-assessment-page__thread-copy,.applicant-technical-assessment-page__body,.applicant-technical-assessment-page__sender>div,.applicant-technical-assessment-page__question-card{display:grid;gap:.35rem;min-width:0}
+.applicant-technical-assessment-page__thread-top{display:flex;justify-content:space-between;gap:.75rem}
+.applicant-technical-assessment-page__thread-top strong,.applicant-technical-assessment-page__thread-subject,.applicant-technical-assessment-page__thread-preview,.applicant-technical-assessment-page__body p,.applicant-technical-assessment-page__detail strong,.applicant-technical-assessment-page__instruction p,.applicant-technical-assessment-page__box span,.applicant-technical-assessment-page__box strong,.applicant-technical-assessment-page__sender span,.applicant-technical-assessment-page__sender time{overflow-wrap:anywhere}
+.applicant-technical-assessment-page__thread-top strong,.applicant-technical-assessment-page__sender strong{color:#193826;font-size:.95rem}
+.applicant-technical-assessment-page__thread-top small,.applicant-technical-assessment-page__sender span,.applicant-technical-assessment-page__sender time{color:#6f8a7b;font-size:.8rem}
+.applicant-technical-assessment-page__thread-subject{color:#264937;font-size:.92rem;font-weight:700}
+.applicant-technical-assessment-page__thread-preview{display:-webkit-box;color:#6b8577;font-size:.84rem;line-height:1.5;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.applicant-technical-assessment-page__thread-tags,.applicant-technical-assessment-page__badges,.applicant-technical-assessment-page__actions,.applicant-technical-assessment-page__rating{display:flex;flex-wrap:wrap;gap:.5rem}
+.applicant-technical-assessment-page__thread-tags span,.badge{display:inline-flex;align-items:center;gap:.4rem;padding:.28rem .52rem;border:1px solid rgba(83,128,98,.16);background:rgba(244,250,246,.92);color:#2a5c42;font-size:.76rem;font-weight:700}
+.applicant-technical-assessment-page__thread-tag--new{border-color:rgba(37,99,235,.18)!important;background:rgba(219,234,254,.9)!important;color:#1d4ed8!important}
+.badge.is-info{background:rgba(225,239,248,.95);color:#285f86}.badge.is-success{background:rgba(221,245,231,.95);color:#176742}.badge.is-warning{background:rgba(255,245,219,.96);color:#996d00}.badge.is-danger{background:rgba(252,232,232,.94);color:#a03636}.badge.is-muted,.badge.muted{background:rgba(237,240,240,.96);color:#536665}
+.applicant-technical-assessment-page__viewer{display:flex;min-height:0;overflow:hidden}
+.applicant-technical-assessment-page__message,.applicant-technical-assessment-page__empty{width:100%}
+.applicant-technical-assessment-page__message{display:grid;align-content:start;gap:1rem;padding:1.25rem 1.35rem 1.4rem;overflow-y:auto;background:linear-gradient(180deg,rgba(248,252,250,.96),rgba(255,255,255,.98) 16rem),#fff}
+.applicant-technical-assessment-page__message-head{display:grid;gap:1rem;padding-bottom:1rem;border-bottom:1px solid rgba(83,128,98,.16)}
+.applicant-technical-assessment-page__message-head h2,.applicant-technical-assessment-page__empty h2,.applicant-technical-assessment-page__empty p,.applicant-technical-assessment-page__question-card h3,.applicant-technical-assessment-page__question-card p{margin:0}
+.applicant-technical-assessment-page__message-head h2{color:#173a28;font-size:clamp(1.35rem,1.8vw,1.8rem);line-height:1.2}
+.applicant-technical-assessment-page__sender{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:.9rem;align-items:center}
+.applicant-technical-assessment-page__body{gap:.55rem}
+.applicant-technical-assessment-page__body p{color:#4c6558;font-size:.96rem;line-height:1.7}
+.applicant-technical-assessment-page__body p:first-child{color:#274737;font-size:1rem}
+.applicant-technical-assessment-page__details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem 1.25rem}
+.applicant-technical-assessment-page__detail{display:grid;gap:.34rem;align-content:start;min-height:3.45rem;padding-left:.95rem;border-left:2px solid rgba(83,128,98,.18)}
+.applicant-technical-assessment-page__detail span,.applicant-technical-assessment-page__instruction span,.applicant-technical-assessment-page__question-head span{color:#6e887a;font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.applicant-technical-assessment-page__detail strong{color:#183927;font-size:.95rem;line-height:1.55}
+.applicant-technical-assessment-page__instruction{display:grid;gap:.55rem;padding-top:1rem;border-top:1px solid rgba(83,128,98,.12)}
+.applicant-technical-assessment-page__instruction p{margin:0;color:#4f675a;font-size:.95rem;line-height:1.7}
+.applicant-technical-assessment-page__box,.applicant-technical-assessment-page__question-card{display:grid;gap:.7rem}
+.applicant-technical-assessment-page__box{padding:.2rem 0 .1rem 1rem;border:0;border-left:3px solid rgba(83,128,98,.22);background:linear-gradient(90deg,rgba(245,250,247,.94),transparent 72%)}
+.applicant-technical-assessment-page__launch{display:grid;gap:.75rem;padding:1rem 1.05rem;border:1px solid rgba(83,128,98,.14);background:linear-gradient(135deg,rgba(244,250,247,.96),rgba(255,255,255,.98))}
+.applicant-technical-assessment-page__launch strong{color:#183927;font-size:.96rem}
+.applicant-technical-assessment-page__launch span{color:#60796c;font-size:.9rem;line-height:1.65}
+.applicant-technical-assessment-page__actions--launch{padding-top:.1rem}
+.applicant-technical-assessment-page__question-card{padding:.95rem 1rem;border:1px solid rgba(83,128,98,.16);background:rgba(248,252,249,.96)}
+.applicant-technical-assessment-page__box strong{color:#20312a;font-size:.88rem}
+.applicant-technical-assessment-page__box span,.applicant-technical-assessment-page__question-card p{color:#63756d;font-size:.84rem;line-height:1.6}
+.applicant-technical-assessment-page__box.danger{border-left-color:rgba(239,68,68,.5);background:linear-gradient(90deg,rgba(254,242,242,.96),transparent 72%)}.applicant-technical-assessment-page__box.danger strong,.applicant-technical-assessment-page__box.danger span{color:#991b1b}
+.applicant-technical-assessment-page__box.success{border-left-color:rgba(34,197,94,.4);background:linear-gradient(90deg,rgba(236,253,243,.94),transparent 72%)}.applicant-technical-assessment-page__box.success strong,.applicant-technical-assessment-page__box.success span{color:#166534}
+.applicant-technical-assessment-page__box.warning{border-left-color:rgba(245,158,11,.42);background:linear-gradient(90deg,rgba(255,251,235,.97),transparent 72%)}.applicant-technical-assessment-page__box.warning strong,.applicant-technical-assessment-page__box.warning span{color:#92400e}
+.applicant-technical-assessment-page__actions button.primary,.applicant-technical-assessment-page__rating-option.is-selected{background:#2f6a49;border-color:#2f6a49;color:#fff}
+.applicant-technical-assessment-page__actions button:disabled{opacity:.65;cursor:not-allowed}
+.applicant-technical-assessment-page__actions--footer{align-items:center;justify-content:space-between}
+.applicant-technical-assessment-page__question-list{display:grid;gap:.9rem}
+.applicant-technical-assessment-page__question-head{display:flex;align-items:center;justify-content:space-between;gap:.75rem}
+.applicant-technical-assessment-page__question-head strong{color:#183927;font-size:.9rem}
+.applicant-technical-assessment-page__question-card h3{color:#173a28;font-size:1rem;line-height:1.45}
+.applicant-technical-assessment-page__input,.applicant-technical-assessment-page__textarea{width:100%;border:1px solid rgba(205,216,226,.92);background:#fff;color:#24342d;font:inherit;padding:.82rem .9rem;transition:border-color .18s ease,box-shadow .18s ease}
+.applicant-technical-assessment-page__textarea{resize:vertical}
+.applicant-technical-assessment-page__input:focus,.applicant-technical-assessment-page__textarea:focus{outline:0;border-color:rgba(47,106,73,.32);box-shadow:0 0 0 4px rgba(47,106,73,.08)}
+.applicant-technical-assessment-page__choices{display:grid;gap:.65rem}
+.applicant-technical-assessment-page__choice{display:flex;align-items:flex-start;gap:.7rem;border:1px solid rgba(221,231,225,.92);background:#fbfcfc;padding:.8rem .9rem;color:#334155}
+.applicant-technical-assessment-page__choice input{margin-top:.16rem}
+.applicant-technical-assessment-page__warning{margin:0;color:#b45309;font-weight:700}
+.applicant-technical-assessment-page__modal-backdrop,.applicant-technical-assessment-page__loading-backdrop{position:fixed;inset:0;display:grid;place-items:center;padding:1.25rem;background:rgba(238,245,241,.56);backdrop-filter:blur(10px);z-index:40}
+.applicant-technical-assessment-page__modal,.applicant-technical-assessment-page__loading-card{width:min(100%,30rem);display:grid;gap:1rem;padding:1.2rem 1.25rem;border:1px solid rgba(66,112,87,.18);background:rgba(255,255,255,.98);box-shadow:0 18px 40px rgba(31,74,51,.16)}
+.applicant-technical-assessment-page__modal-label{color:#6e887a;font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.applicant-technical-assessment-page__modal h3,.applicant-technical-assessment-page__loading-card strong{margin:0;color:#183927;font-size:1.08rem}
+.applicant-technical-assessment-page__modal p,.applicant-technical-assessment-page__loading-card p{margin:0;color:#5d7668;line-height:1.65}
+.applicant-technical-assessment-page__modal-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:.65rem}
+.applicant-technical-assessment-page__modal-actions button{display:inline-flex;align-items:center;justify-content:center;gap:.55rem;padding:.74rem .95rem;border:1px solid rgba(83,128,98,.18);background:#fff;color:#355745;font:inherit;font-weight:700;cursor:pointer}
+.applicant-technical-assessment-page__modal-actions button.primary{background:#2f6a49;border-color:#2f6a49;color:#fff}
+.applicant-technical-assessment-page__loading-card{justify-items:center;text-align:center}
+.applicant-technical-assessment-page__spinner{width:2.6rem;height:2.6rem;border:.24rem solid rgba(47,106,73,.16);border-top-color:#2f6a49;border-radius:999px;animation:applicantTechnicalAssessmentSpin .7s linear infinite}
+.applicant-technical-assessment-page__modal--result{width:min(100%,32rem)}
+.applicant-technical-assessment-page__result-pill{display:inline-flex;justify-self:start;align-items:center;padding:.34rem .68rem;border:1px solid rgba(83,128,98,.18);font-size:.78rem;font-weight:700}
+.applicant-technical-assessment-page__result-pill.is-success{background:rgba(221,245,231,.95);color:#176742}
+.applicant-technical-assessment-page__result-pill.is-danger{background:rgba(252,232,232,.95);color:#a03636}
+.applicant-technical-assessment-page__result-footnote{font-size:.9rem}
+.applicant-technical-assessment-page__result-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.9rem 1.05rem;padding-top:.2rem}
+.applicant-technical-assessment-page__detail--danger{border-left-color:rgba(239,68,68,.35)!important}
+.applicant-technical-assessment-page__detail--danger strong{color:#991b1b}
+.applicant-technical-assessment-page__empty{display:grid;place-items:center;align-content:center;gap:.8rem;padding:2rem;text-align:center;color:#5f7a6b;min-height:min(42rem,calc(100vh - 10rem))}
+.applicant-technical-assessment-page__empty--inline{min-height:auto;height:100%}
+.applicant-technical-assessment-page__empty i{font-size:2rem;color:#4a7b5f}
+@keyframes applicantTechnicalAssessmentSpin{to{transform:rotate(360deg)}}
+@media (max-width:1180px){.applicant-technical-assessment-page{min-height:auto}.applicant-technical-assessment-page__shell{grid-template-columns:1fr}.applicant-technical-assessment-page__list-pane{max-height:28rem}.applicant-technical-assessment-page__viewer{min-height:30rem}}
+@media (max-width:720px){.applicant-technical-assessment-page{padding:0 .85rem}.applicant-technical-assessment-page__message{padding-inline:1rem}.applicant-technical-assessment-page__sender,.applicant-technical-assessment-page__details,.applicant-technical-assessment-page__result-summary{grid-template-columns:1fr}.applicant-technical-assessment-page__actions,.applicant-technical-assessment-page__actions--footer,.applicant-technical-assessment-page__modal-actions{flex-direction:column;align-items:stretch}.applicant-technical-assessment-page__actions button,.applicant-technical-assessment-page__rating-option,.applicant-technical-assessment-page__modal-actions button{width:100%}.applicant-technical-assessment-page__question-head{flex-direction:column;align-items:flex-start}}
 </style>

@@ -747,42 +747,72 @@ const handleBulkHistoryDelete = async () => {
 }
 
 .deleted-history-action-btn {
-  width: 2.2rem;
-  height: 2.2rem;
-  border: 0;
-  border-radius: 0.45rem;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: 1px solid rgba(122, 179, 145, 0.18);
+  border-radius: 0.82rem;
   display: grid;
   place-items: center;
-  background: transparent;
-  color: #8a978f;
+  background: #ffffff;
+  color: #2b5540;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
   cursor: pointer;
   transition:
-    background-color 0.2s ease,
-    color 0.2s ease;
+    transform 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .deleted-history-action-btn i {
-  font-size: 1rem;
+  font-size: 0.95rem;
 }
 
 .deleted-history-action-btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.deleted-history-action-btn--restore {
+  border-color: rgba(82, 175, 118, 0.2);
+  color: #2e6d45;
 }
 
 .deleted-history-action-btn--restore:hover {
+  transform: translateY(-1px);
   background: rgba(235, 247, 240, 0.98);
   color: #228454;
+  border-color: rgba(82, 175, 118, 0.28);
+  box-shadow: 0 12px 20px rgba(31, 74, 51, 0.08);
+}
+
+.deleted-history-action-btn--archive {
+  border-color: rgba(82, 175, 118, 0.2);
+  color: #2e6d45;
 }
 
 .deleted-history-action-btn--archive:hover {
+  transform: translateY(-1px);
   background: rgba(235, 247, 240, 0.98);
   color: #228454;
+  border-color: rgba(82, 175, 118, 0.28);
+  box-shadow: 0 12px 20px rgba(31, 74, 51, 0.08);
+}
+
+.deleted-history-action-btn--neutral {
+  border-color: rgba(122, 179, 145, 0.18);
+  color: #2b5540;
 }
 
 .deleted-history-action-btn--neutral:hover {
+  transform: translateY(-1px);
   background: rgba(241, 245, 249, 0.96);
   color: #2d684d;
+  border-color: rgba(47, 106, 73, 0.26);
+  box-shadow: 0 12px 20px rgba(31, 74, 51, 0.08);
 }
 
 .deleted-history-table__actions-head,

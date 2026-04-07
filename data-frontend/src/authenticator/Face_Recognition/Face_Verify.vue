@@ -1,8 +1,4 @@
 <script setup>
-import * as blazeface from '@tensorflow-models/blazeface'
-import * as cocoSsd from '@tensorflow-models/coco-ssd'
-import * as faceLandmarksDetection from '@tensorflow-models/face-landmarks-detection'
-import * as tf from '@tensorflow/tfjs'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = defineProps({
@@ -79,6 +75,10 @@ let blinkChallengeStartedAt = 0
 let blinkFailureUntil = 0
 let phoneDetectedUntil = 0
 let lastPhoneCheckAt = 0
+let tfModulePromise = null
+let blazefaceModulePromise = null
+let faceLandmarksDetectionModulePromise = null
+let cocoSsdModulePromise = null
 
 const MIN_FACE_SHARPNESS = 10
 const MIN_FACE_BRIGHTNESS = 20
@@ -93,6 +93,42 @@ const BLINK_TIMEOUT_MS = 4000
 const BLINK_FAIL_DISPLAY_MS = 1600
 const PHONE_DETECTED_DISPLAY_MS = 1800
 const PHONE_CHECK_INTERVAL_MS = 700
+
+const loadTf = async () => {
+  if (!tfModulePromise) {
+    tfModulePromise = import('@tensorflow/tfjs')
+  }
+
+  const module = await tfModulePromise
+  return module?.default || module
+}
+
+const loadBlazeface = async () => {
+  if (!blazefaceModulePromise) {
+    blazefaceModulePromise = import('@tensorflow-models/blazeface')
+  }
+
+  const module = await blazefaceModulePromise
+  return module?.default || module
+}
+
+const loadFaceLandmarksDetection = async () => {
+  if (!faceLandmarksDetectionModulePromise) {
+    faceLandmarksDetectionModulePromise = import('@tensorflow-models/face-landmarks-detection')
+  }
+
+  const module = await faceLandmarksDetectionModulePromise
+  return module?.default || module
+}
+
+const loadCocoSsd = async () => {
+  if (!cocoSsdModulePromise) {
+    cocoSsdModulePromise = import('@tensorflow-models/coco-ssd')
+  }
+
+  const module = await cocoSsdModulePromise
+  return module?.default || module
+}
 
 const resetTrackingState = () => {
   isFaceDetected.value = false
@@ -369,6 +405,7 @@ const ensureFaceDetector = async () => {
   }
 
   try {
+    const [tf, blazeface] = await Promise.all([loadTf(), loadBlazeface()])
     await tf.ready()
     if (!faceDetector) {
       fallbackFaceDetector = await blazeface.load()
@@ -393,6 +430,10 @@ const ensureLandmarkDetector = async () => {
   if (landmarkDetector) return true
 
   try {
+    const [tf, faceLandmarksDetection] = await Promise.all([
+      loadTf(),
+      loadFaceLandmarksDetection(),
+    ])
     await tf.ready()
     landmarkDetector = await faceLandmarksDetection.createDetector(
       faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh,
@@ -413,6 +454,7 @@ const ensureObjectDetector = async () => {
   if (objectDetector) return true
 
   try {
+    const [tf, cocoSsd] = await Promise.all([loadTf(), loadCocoSsd()])
     await tf.ready()
     objectDetector = await cocoSsd.load()
     return true

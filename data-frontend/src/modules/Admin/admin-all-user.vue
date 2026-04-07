@@ -246,11 +246,12 @@ const filterSummary = computed(() => {
 .admin-all-user__status.is-approved { background: #edf9f1; color: #1f7a47; }
 .admin-all-user__status.is-pending { background: #fff6e7; color: #b07219; }
 .admin-all-user__status.is-rejected { background: #fff0f0; color: #b33838; }
-.admin-all-user__actions { display: flex; align-items: center; justify-content: flex-start; gap: 0.28rem; }
-.admin-all-user__action-btn { width: 2.2rem; height: 2.2rem; border: 0; border-radius: 0.45rem; display: grid; place-items: center; background: transparent; color: #8a978f; cursor: pointer; transition: transform 0.2s ease, background-color 0.2s ease, color 0.2s ease; }
-.admin-all-user__action-btn i { font-size: 1rem; }
-.admin-all-user__action-btn:hover { transform: none; background: rgba(235, 247, 240, 0.98); color: #2d684d; }
-.admin-all-user__action-btn--danger:hover { background: rgba(252, 239, 239, 0.98); color: #a54545; }
+.admin-all-user__actions { display: flex; align-items: center; justify-content: flex-start; gap: 0.35rem; }
+.admin-all-user__action-btn { width: 2.1rem; height: 2.1rem; border: 1px solid rgba(122, 179, 145, 0.18); border-radius: 0.82rem; display: grid; place-items: center; background: #fff; color: #2b5540; cursor: pointer; box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05); transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, color 0.18s ease, background-color 0.18s ease; }
+.admin-all-user__action-btn i { font-size: 0.95rem; }
+.admin-all-user__action-btn:hover { transform: translateY(-1px); box-shadow: 0 12px 20px rgba(31, 74, 51, 0.08); border-color: rgba(47, 106, 73, 0.26); color: #2b5540; }
+.admin-all-user__action-btn--danger { border-color: rgba(214, 120, 92, 0.2); color: #9b4126; background: rgba(255, 247, 245, 0.98); }
+.admin-all-user__action-btn--danger:hover { border-color: rgba(214, 120, 92, 0.28); background: rgba(252, 239, 239, 0.98); color: #a54545; }
 .admin-all-user__empty { padding: 1rem; border: 1px dashed rgba(213, 226, 219, 0.92); border-radius: 1rem; color: #708579; text-align: center; }
 .admin-all-user-row-enter-active, .admin-all-user-row-leave-active { transition: all 0.22s ease; }
 .admin-all-user-row-enter-from, .admin-all-user-row-leave-to { opacity: 0; transform: translateY(8px); }

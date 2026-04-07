@@ -229,23 +229,29 @@ onBeforeUnmount(() => {
           <div class="admin-plan-list-card__actions">
             <button
               type="button"
-              class="admin-table-action"
+              class="admin-table-action admin-plan-list-card__action-icon"
               :class="plan.isEnabled ? 'admin-table-action--warning' : 'admin-table-action--success'"
               :disabled="isActionLoading"
+              :title="isActionLoading && activeActionPlanId === plan.id ? (plan.isEnabled ? 'Disabling' : 'Enabling') : (plan.isEnabled ? 'Disable' : 'Enable')"
+              :aria-label="isActionLoading && activeActionPlanId === plan.id ? (plan.isEnabled ? 'Disabling' : 'Enabling') : (plan.isEnabled ? 'Disable' : 'Enable')"
               @click="handleToggleEnabled(plan)"
             >
               <template v-if="isActionLoading && activeActionPlanId === plan.id">
                 <span class="admin-table-action__spinner" aria-hidden="true" />
-                {{ plan.isEnabled ? 'Disabling...' : 'Enabling...' }}
               </template>
               <template v-else>
                 <i :class="plan.isEnabled ? 'bi bi-pause-circle' : 'bi bi-check-circle'" aria-hidden="true" />
-                {{ plan.isEnabled ? 'Disable' : 'Enable' }}
               </template>
             </button>
-            <button type="button" class="admin-table-action admin-table-action--danger admin-plan-list-card__delete" :disabled="isActionLoading" @click="handleDelete(plan)">
+            <button
+              type="button"
+              class="admin-table-action admin-table-action--danger admin-plan-list-card__action-icon admin-plan-list-card__delete"
+              :disabled="isActionLoading"
+              title="Delete"
+              aria-label="Delete"
+              @click="handleDelete(plan)"
+            >
               <i class="bi bi-trash3" aria-hidden="true" />
-              Delete
             </button>
           </div>
 
@@ -351,7 +357,7 @@ onBeforeUnmount(() => {
 .admin-plan-list-card__access-tag { display: inline-flex; align-items: center; min-height: 2rem; border-radius: 999px; border: 1px solid #d7e2dc; background: #fff; }
 .admin-plan-list-card__access-tag-copy { display: inline-flex; align-items: center; padding: 0 0.66rem; color: #355143; font-size: 0.71rem; font-weight: 700; }
 .admin-plan-list-card__access-empty, .admin-plan-list-card__note { margin: 0; color: #74867b; font-size: 0.76rem; line-height: 1.5; }
-.admin-plan-list-card__actions { display: flex; gap: 0.55rem; padding-top: 0.15rem; }
+.admin-plan-list-card__actions { display: flex; gap: 0.45rem; padding-top: 0.15rem; }
 .admin-table-action { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem; min-height: 2.45rem; padding: 0 0.9rem; border: 1px solid #d7dfd9; border-radius: 0.82rem; background: linear-gradient(180deg, #ffffff 0%, #f6f9f7 100%); color: #173026; font-size: 0.74rem; font-weight: 800; cursor: pointer; box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08); transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease; }
 .admin-table-action i { font-size: 0.82rem; }
 .admin-table-action:hover { transform: translateY(-1px); box-shadow: 0 12px 22px rgba(15, 23, 42, 0.12); }
@@ -361,6 +367,8 @@ onBeforeUnmount(() => {
 .admin-table-action--ghost { flex: 1 1 auto; background: linear-gradient(180deg, #f8fbf9 0%, #edf4f0 100%); color: #305141; border: 1px solid #d5e0da; }
 .admin-table-action--danger { border-color: #f1cdcd; background: linear-gradient(180deg, #ffffff 0%, #fff3f3 100%); color: #b14242; }
 .admin-table-action--warning { border-color: #f1debb; background: linear-gradient(180deg, #ffffff 0%, #fff6e7 100%); color: #ad7217; }
+.admin-plan-list-card__action-icon { flex: 0 0 auto; width: 2.1rem; height: 2.1rem; min-height: 2.1rem; padding: 0; gap: 0; border-radius: 0.82rem; }
+.admin-plan-list-card__action-icon i { font-size: 0.95rem; }
 .admin-plan-list-card__delete { min-width: 0; }
 .admin-plan-list-empty { display: grid; justify-items: center; gap: 0.7rem; padding: 2.4rem 1rem 1.4rem; border: 1px dashed #d3dfd8; border-radius: 1.35rem; background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(246, 250, 247, 0.96) 100%); }
 .admin-plan-list-empty i { color: #67967b; font-size: 1.6rem; }
@@ -372,5 +380,5 @@ onBeforeUnmount(() => {
   0%, 100% { transform: translateY(0) scale(1); }
   50% { transform: translateY(-4px) scale(1.03); }
 }
-@media (max-width: 720px) { .admin-plan-preview-shell__head, .admin-plan-list-card__actions { flex-direction: column; } }
+@media (max-width: 720px) { .admin-plan-preview-shell__head { flex-direction: column; } }
 </style>

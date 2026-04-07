@@ -28,6 +28,8 @@ const REMEMBERED_LOGIN_EMAIL_KEY = 'rememberedLoginEmail'
 const APPLICANT_ENTRY_TRANSITION_KEY = 'applicantDashboardEntryTransition'
 const APPLICANT_WELCOME_TOAST_KEY = 'applicantWelcomeToastName'
 const LOGOUT_TOAST_KEY = 'showLoggedOutToast'
+const BUSINESS_WORKSPACE_FORCE_DASHBOARD_KEY = 'businessWorkspaceForceDashboard'
+const BUSINESS_WORKSPACE_REFRESH_QUERY_KEY = 'workspaceRefresh'
 
 const organizationType = computed(() => String(route.query.organizationType || '').trim().toLowerCase())
 const employerAccountLabel = computed(() =>
@@ -133,6 +135,19 @@ const getUserFirstName = (user) => {
   if (!profileName) return 'Applicant'
 
   return profileName.split(/\s+/)[0] || 'Applicant'
+}
+
+const buildWorkspaceRefreshLocation = (targetRoute) => {
+  const normalizedTargetRoute = String(targetRoute || '/login').trim() || '/login'
+  if (typeof window === 'undefined') return normalizedTargetRoute
+
+  const nextUrl = new URL(normalizedTargetRoute, window.location.origin)
+
+  if (nextUrl.pathname === '/employer/business') {
+    nextUrl.searchParams.set(BUSINESS_WORKSPACE_REFRESH_QUERY_KEY, String(Date.now()))
+  }
+
+  return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`
 }
 
 const clearFieldError = (field) => {
@@ -253,9 +268,17 @@ const submitLogin = async () => {
     }
 
     if (data.user?.role === 'employer') {
+      const employerDashboardRoute = getEmployerDashboardRoute(data.user, organizationType.value)
       sessionStorage.setItem('employerPricingIntro', '1')
+      if (employerDashboardRoute === '/employer/business') {
+        sessionStorage.setItem(BUSINESS_WORKSPACE_FORCE_DASHBOARD_KEY, '1')
+      }
       notify('Login successful. Redirecting...', 'success')
-      router.push(getEmployerDashboardRoute(data.user))
+      if (typeof window !== 'undefined' && employerDashboardRoute === '/employer/business') {
+        window.location.assign(buildWorkspaceRefreshLocation(employerDashboardRoute))
+        return
+      }
+      await router.replace(employerDashboardRoute || '/login')
       return
     }
 
