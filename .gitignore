@@ -8,3 +8,7 @@ codex-backups/
 firebase-debug.log
 local-backup-*.patch
 data-frontend/Proximity_HireablePWD/
+.vscode/
+New-data/
+_push_business/
+_push_snapshot/
