@@ -1,499 +1,304 @@
 import { computed } from 'vue'
 
+const text = (value = '') => String(value ?? '').trim()
+
+const createFallbackApplicants = () => ([
+  {
+    id: 'applicant-1',
+    name: 'Maria Santos',
+    role: 'Applicant for Cashier',
+    appliedAtLabel: 'today',
+    statusTone: 'new',
+    statusLabel: 'Fresh',
+    isNew: true,
+    initials: 'MS',
+    avatarUrl: '',
+  },
+  {
+    id: 'applicant-2',
+    name: 'John Dela Cruz',
+    role: 'Applicant for Sales Associate',
+    appliedAtLabel: 'yesterday',
+    statusTone: 'review',
+    statusLabel: 'Under review',
+    isNew: false,
+    initials: 'JD',
+    avatarUrl: '',
+  },
+  {
+    id: 'applicant-3',
+    name: 'Angela Reyes',
+    role: 'Applicant for Service Crew',
+    appliedAtLabel: '2 days ago',
+    statusTone: 'interview',
+    statusLabel: 'Interview',
+    isNew: false,
+    initials: 'AR',
+    avatarUrl: '',
+  },
+  {
+    id: 'applicant-4',
+    name: 'Paolo Mendoza',
+    role: 'Applicant for Store Support',
+    appliedAtLabel: '3 days ago',
+    statusTone: 'pending',
+    statusLabel: 'Pending',
+    isNew: false,
+    initials: 'PM',
+    avatarUrl: '',
+  },
+])
+
+const createFallbackJobs = () => ([
+  { id: 'job-1', title: 'Cashier', isOpen: true },
+  { id: 'job-2', title: 'Sales Associate', isOpen: true },
+  { id: 'job-3', title: 'Service Crew', isOpen: true },
+  { id: 'job-4', title: 'Store Support', isOpen: true },
+  { id: 'job-5', title: 'Inventory Clerk', isOpen: true },
+  { id: 'job-6', title: 'Shift Lead', isOpen: true },
+  { id: 'job-7', title: 'Branch Coordinator', isOpen: true },
+])
+
+const createFallbackTeamMembers = (isEmployeeWorkspaceMode = false) =>
+  Array.from({ length: isEmployeeWorkspaceMode ? 4 : 11 }, (_, index) => ({
+    id: `member-${index + 1}`,
+  }))
+
+const normalizeApplicantTone = (status = '') => {
+  const normalizedStatus = text(status).toLowerCase()
+
+  if (normalizedStatus.includes('interview')) return 'interview'
+  if (normalizedStatus.includes('review')) return 'review'
+  if (normalizedStatus.includes('approve')) return 'approved'
+  if (normalizedStatus.includes('reject')) return 'rejected'
+  if (normalizedStatus.includes('new') || normalizedStatus.includes('fresh')) return 'new'
+
+  return 'pending'
+}
+
+const normalizeApplicantLabel = (status = '') => {
+  const normalizedStatus = text(status)
+  if (!normalizedStatus) return 'Pending'
+  return normalizedStatus
+}
+
+const buildDashboardTrendMonths = (jobCount, applicantCount) => {
+  const safeJobCount = Math.max(Number(jobCount) || 0, 1)
+  const safeApplicantCount = Math.max(Number(applicantCount) || 0, 1)
+
+  return [
+    { key: 'jan', label: 'Jan', jobs: Math.max(1, safeJobCount - 5), applicants: Math.max(1, safeApplicantCount - 13) },
+    { key: 'feb', label: 'Feb', jobs: Math.max(1, safeJobCount - 4), applicants: Math.max(1, safeApplicantCount - 11) },
+    { key: 'mar', label: 'Mar', jobs: Math.max(1, safeJobCount - 4), applicants: Math.max(1, safeApplicantCount - 10) },
+    { key: 'apr', label: 'Apr', jobs: Math.max(1, safeJobCount - 3), applicants: Math.max(1, safeApplicantCount - 9) },
+    { key: 'may', label: 'May', jobs: Math.max(1, safeJobCount - 3), applicants: Math.max(1, safeApplicantCount - 7) },
+    { key: 'jun', label: 'Jun', jobs: Math.max(1, safeJobCount - 2), applicants: Math.max(1, safeApplicantCount - 6) },
+    { key: 'jul', label: 'Jul', jobs: Math.max(1, safeJobCount - 2), applicants: Math.max(1, safeApplicantCount - 5) },
+    { key: 'aug', label: 'Aug', jobs: Math.max(1, safeJobCount - 1), applicants: Math.max(1, safeApplicantCount - 4) },
+    { key: 'sep', label: 'Sep', jobs: Math.max(1, safeJobCount - 1), applicants: Math.max(1, safeApplicantCount - 3) },
+    { key: 'oct', label: 'Oct', jobs: Math.max(1, safeJobCount - 1), applicants: Math.max(1, safeApplicantCount - 3) },
+    { key: 'nov', label: 'Nov', jobs: safeJobCount, applicants: Math.max(1, safeApplicantCount - 1) },
+    { key: 'dec', label: 'Dec', jobs: safeJobCount, applicants: safeApplicantCount },
+  ]
+}
+
+const buildLinePath = (points = []) =>
+  points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ')
+
 export const createDashboardState = (ctx = {}) => {
-  const {
-    employeeDirectory,
-    workspaceUserDirectory,
-    businessJobApplications,
-    normalizeUserOverviewValue,
-    postedJobs,
-    postedJobsSummary,
-    approvedApplicantTemplateAssignments,
-    trainingTemplateAssignments,
-    hasUnlockedBusinessWorkspace,
-    isPostedJobsLoading,
-    postedJobsSyncMessage,
-    isWorkspaceUserDirectoryLoading,
-    workspaceUserDirectorySyncMessage,
-    currentBusinessAccountIdentity,
-    assessmentTemplateLibrary,
-    trainingTemplateLibrary,
-  } = ctx
+  const dashboardApplicantFeed = computed(() => {
+    const sourceApplicants = Array.isArray(ctx.businessJobApplications?.value)
+      ? ctx.businessJobApplications.value
+      : createFallbackApplicants()
 
-  const summaryCards = computed(() => {
-    const linkedActiveMembers = employeeDirectory.value.filter((employee) => employee.status === 'Active').length
-    const totalWorkspaceMembers = workspaceUserDirectory.value.length
-    const activeMembers = Math.max(linkedActiveMembers, totalWorkspaceMembers)
-    const totalApplicants = businessJobApplications.value.length
-    const reviewApplicants = businessJobApplications.value.filter((application) =>
-      ['reviewing', 'under review', 'in_review'].includes(normalizeUserOverviewValue(application?.status)),
-    ).length
+    return sourceApplicants.slice(0, 6).map((item, index) => {
+      const normalizedName = text(item?.name || item?.fullName || item?.applicant_name) || `Applicant ${index + 1}`
+      const initials = normalizedName
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part.charAt(0).toUpperCase())
+        .join('') || 'AP'
+      const normalizedStatus = normalizeApplicantLabel(item?.statusLabel || item?.status)
+      const statusTone = normalizeApplicantTone(normalizedStatus)
 
-    return [
-      {
-        label: 'Posted Jobs',
-        value: String(postedJobs.value.length),
-        subtitle: `${postedJobsSummary.value.openCount} open listings in the workspace`,
-        icon: 'bi bi-briefcase',
-        tone: 'emerald',
-      },
-      {
-        label: 'Applicants',
-        value: String(totalApplicants),
-        subtitle: totalApplicants
-          ? `${reviewApplicants} applicants currently under review in this workspace`
-          : 'No applicant submissions have arrived in this workspace yet',
-        icon: 'bi bi-people',
-        tone: 'sky',
-      },
-      {
-        label: 'Team Members',
-        value: String(totalWorkspaceMembers),
-        subtitle: totalWorkspaceMembers
-          ? `${activeMembers} synced members connected to this business workspace`
-          : 'No synced team members in this business workspace yet',
-        icon: 'bi bi-person-badge',
-        tone: 'amber',
-      },
-      {
-        label: 'Workspace Access',
-        value: 'Active',
-        subtitle: 'Business tools and workspace pages are ready to use.',
-        icon: 'bi bi-stars',
-        tone: 'violet',
-      },
-    ]
-  })
-
-  const dashboardTrendMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-  const clampDashboardPercent = (value) => Math.max(0, Math.min(100, Math.round(Number(value) || 0)))
-  const formatDashboardPercent = (value) => `${clampDashboardPercent(value)}%`
-  const buildDashboardRingStyle = (
-    value,
-    activeStart,
-    activeEnd = activeStart,
-    idleColor = 'rgba(219, 229, 221, 0.92)',
-  ) => {
-    const percent = clampDashboardPercent(value)
-    return {
-      background: `radial-gradient(circle at center, #ffffff 58%, transparent 59%), conic-gradient(${activeStart} 0%, ${activeEnd} ${percent}%, ${idleColor} ${percent}%, ${idleColor} 100%)`,
-    }
-  }
-  const resolveDashboardSyncState = (loading, message) => {
-    if (loading) return 'syncing'
-    if (String(message || '').trim()) return 'issue'
-    return 'live'
-  }
-  const resolveDashboardSyncLabel = (state) => {
-    if (state === 'syncing') return 'Syncing'
-    if (state === 'issue') return 'Check'
-    return 'Live'
-  }
-  const countDashboardRecordsByMonth = (records = [], dateKeys = []) => {
-    const currentYear = new Date().getFullYear()
-    const monthlyCounts = Array.from({ length: 12 }, () => 0)
-
-    records.forEach((record) => {
-      const resolvedKey = dateKeys.find((key) => String(record?.[key] || '').trim())
-      const rawValue = resolvedKey ? record?.[resolvedKey] : ''
-      const parsedDate = new Date(String(rawValue || ''))
-      if (Number.isNaN(parsedDate.getTime()) || parsedDate.getFullYear() !== currentYear) return
-      monthlyCounts[parsedDate.getMonth()] += 1
-    })
-
-    return monthlyCounts
-  }
-  const buildDashboardSmoothLinePath = (points = []) => {
-    if (!Array.isArray(points) || !points.length) return ''
-    if (points.length === 1) {
-      return `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`
-    }
-
-    let path = `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`
-    for (let index = 0; index < points.length - 1; index += 1) {
-      const currentPoint = points[index]
-      const nextPoint = points[index + 1]
-      const controlX = currentPoint.x + ((nextPoint.x - currentPoint.x) / 2)
-      path += ` C ${controlX.toFixed(2)} ${currentPoint.y.toFixed(2)}, ${controlX.toFixed(2)} ${nextPoint.y.toFixed(2)}, ${nextPoint.x.toFixed(2)} ${nextPoint.y.toFixed(2)}`
-    }
-
-    return path
-  }
-  const buildDashboardAreaPath = (points = [], chartHeight = 0) => {
-    if (!points.length || chartHeight <= 0) return ''
-    const linePath = buildDashboardSmoothLinePath(points)
-    const firstPoint = points[0]
-    const lastPoint = points[points.length - 1]
-    return `${linePath} L ${lastPoint.x.toFixed(2)} ${chartHeight.toFixed(2)} L ${firstPoint.x.toFixed(2)} ${chartHeight.toFixed(2)} Z`
-  }
-  const calculateDashboardGrowth = (current, previous) => {
-    const safeCurrent = Number(current) || 0
-    const safePrevious = Number(previous) || 0
-    if (safePrevious <= 0) {
       return {
-        value: safeCurrent > 0 ? 100 : 0,
-        isNew: safeCurrent > 0,
-        trend: safeCurrent > 0 ? 'up' : 'steady',
-      }
-    }
-
-    const value = Math.round(((safeCurrent - safePrevious) / safePrevious) * 100)
-    return {
-      value,
-      isNew: false,
-      trend: value > 0 ? 'up' : value < 0 ? 'down' : 'steady',
-    }
-  }
-  const formatDashboardGrowthLabel = (growth) => {
-    if (growth.isNew) return 'New activity'
-    if (growth.value > 0) return `+${growth.value}%`
-    if (growth.value < 0) return `${growth.value}%`
-    return 'No change'
-  }
-  const dashboardJobTrendSeries = computed(() =>
-    countDashboardRecordsByMonth(postedJobs.value, ['createdAt', 'updatedAt']),
-  )
-  const dashboardApplicantTrendSeries = computed(() =>
-    countDashboardRecordsByMonth(businessJobApplications.value, ['appliedAt', 'createdAt', 'submittedAt']),
-  )
-  const businessTrendChart = computed(() => {
-    const currentYear = new Date().getFullYear()
-    const currentMonthIndex = new Date().getMonth()
-    const months = dashboardTrendMonths.map((label, index) => {
-      const jobs = dashboardJobTrendSeries.value[index] || 0
-      const applicants = dashboardApplicantTrendSeries.value[index] || 0
-      return {
-        key: `${currentYear}-${String(index + 1).padStart(2, '0')}`,
-        label,
-        jobs,
-        applicants,
-        total: jobs + applicants,
+        id: text(item?.id || item?.applicationId || item?.email || `applicant-${index + 1}`),
+        name: normalizedName,
+        role: text(item?.role || item?.appliedRole || item?.jobTitle || item?.position) || 'Applicant',
+        appliedAtLabel: text(item?.appliedAtLabel || item?.date || item?.appliedAt) || 'recently',
+        statusTone,
+        statusLabel: normalizedStatus,
+        isNew: item?.isNew === true || statusTone === 'new',
+        initials,
+        avatarUrl: text(item?.avatarUrl || item?.avatar || item?.photoURL),
       }
     })
-
-    const chartWidth = 600
-    const chartHeight = 188
-    const maxValue = Math.max(1, ...months.map((month) => Math.max(month.jobs, month.applicants)))
-    const stepX = months.length > 1 ? chartWidth / (months.length - 1) : chartWidth
-    const toY = (value) => chartHeight - ((value / maxValue) * (chartHeight - 36) + 18)
-
-    const jobPoints = months.map((month, index) => ({
-      x: index * stepX,
-      y: toY(month.jobs),
-      value: month.jobs,
-      label: month.label,
-      isCurrent: index === currentMonthIndex,
-    }))
-    const applicantPoints = months.map((month, index) => ({
-      x: index * stepX,
-      y: toY(month.applicants),
-      value: month.applicants,
-      label: month.label,
-      isCurrent: index === currentMonthIndex,
-    }))
-
-    const currentMonth = months[currentMonthIndex] || months[months.length - 1] || {
-      label: 'This month',
-      jobs: 0,
-      applicants: 0,
-      total: 0,
-    }
-    const previousMonth = months[Math.max(currentMonthIndex - 1, 0)] || currentMonth
-    const jobGrowth = calculateDashboardGrowth(currentMonth.jobs, previousMonth.jobs)
-    const applicantGrowth = calculateDashboardGrowth(currentMonth.applicants, previousMonth.applicants)
-    const totalGrowth = calculateDashboardGrowth(currentMonth.total, previousMonth.total)
-    const peakMonth = months.reduce((peak, month) => (month.total > peak.total ? month : peak), months[0] || {
-      label: 'Jan',
-      jobs: 0,
-      applicants: 0,
-      total: 0,
-    })
-
-    return {
-      months,
-      chartWidth,
-      chartHeight,
-      jobPath: buildDashboardSmoothLinePath(jobPoints),
-      applicantPath: buildDashboardSmoothLinePath(applicantPoints),
-      jobAreaPath: buildDashboardAreaPath(jobPoints, chartHeight),
-      jobPoints,
-      applicantPoints,
-      totalJobs: months.reduce((sum, month) => sum + month.jobs, 0),
-      totalApplicants: months.reduce((sum, month) => sum + month.applicants, 0),
-      callout: {
-        label: currentMonth.label,
-        value: currentMonth.total,
-        copy: `${currentMonth.jobs} jobs and ${currentMonth.applicants} applicants this month`,
-      },
-      highlightCards: [
-        {
-          label: 'Jobs This Month',
-          value: String(currentMonth.jobs),
-          detail: `${formatDashboardGrowthLabel(jobGrowth)} vs ${previousMonth.label}`,
-          trend: jobGrowth.trend,
-          tone: 'jobs',
-        },
-        {
-          label: 'Applicants This Month',
-          value: String(currentMonth.applicants),
-          detail: `${formatDashboardGrowthLabel(applicantGrowth)} vs ${previousMonth.label}`,
-          trend: applicantGrowth.trend,
-          tone: 'applicants',
-        },
-        {
-          label: 'Workspace Momentum',
-          value: String(currentMonth.total),
-          detail: `${formatDashboardGrowthLabel(totalGrowth)} with peak in ${peakMonth.label}`,
-          trend: totalGrowth.trend,
-          tone: 'momentum',
-        },
-      ],
-    }
   })
-  const dashboardInterviewReadyCount = computed(() =>
-    businessJobApplications.value.filter((item) =>
-      normalizeUserOverviewValue(item?.status).includes('interview'),
-    ).length,
-  )
-  const dashboardApplicantsUnderReviewCount = computed(() =>
-    businessJobApplications.value.filter((item) =>
-      ['reviewing', 'under review', 'in_review'].includes(normalizeUserOverviewValue(item?.status)),
-    ).length,
-  )
-  const dashboardPendingApplicantCount = computed(() =>
-    businessJobApplications.value.filter((item) => {
-      const normalizedStatus = normalizeUserOverviewValue(item?.status || 'applied')
-      return ['applied', 'pending', 'reviewing', 'under review', 'in_review'].includes(normalizedStatus)
-    }).length,
-  )
-  const dashboardAssignedAssessmentCount = computed(() =>
-    approvedApplicantTemplateAssignments.value.filter((applicant) =>
-      normalizeUserOverviewValue(applicant?.assignmentStatus) === 'assigned',
-    ).length,
-  )
-  const dashboardAssignedTrainingCount = computed(() =>
-    trainingTemplateAssignments.value.filter((member) =>
-      normalizeUserOverviewValue(member?.assignmentStatus) === 'assigned',
-    ).length,
-  )
-  const dashboardHiringCyclePercent = computed(() => {
-    const totalApplicants = businessJobApplications.value.length
-    if (!totalApplicants) return 0
-    const progressedApplicants = dashboardApplicantsUnderReviewCount.value + dashboardInterviewReadyCount.value
-    return (progressedApplicants / totalApplicants) * 100
-  })
-  const dashboardInterviewRatePercent = computed(() => {
-    const totalApplicants = businessJobApplications.value.length
-    if (!totalApplicants) return 0
-    return (dashboardInterviewReadyCount.value / totalApplicants) * 100
-  })
-  const dashboardWorkspaceHealthPercent = computed(() => {
-    const checkpointCount = 5
-    const completedCheckpoints = [
-      postedJobs.value.length > 0,
-      businessJobApplications.value.length > 0,
-      workspaceUserDirectory.value.length > 0,
-      assessmentTemplateLibrary.value.length > 0 || trainingTemplateLibrary.value.length > 0,
-      hasUnlockedBusinessWorkspace.value,
-    ].filter(Boolean).length
 
-    return (completedCheckpoints / checkpointCount) * 100
+  const dashboardOpenJobs = computed(() => {
+    const sourceJobs = Array.isArray(ctx.businessJobPosts?.value)
+      ? ctx.businessJobPosts.value
+      : createFallbackJobs()
+
+    const openJobs = sourceJobs.filter((item) => item?.isOpen !== false && text(item?.status).toLowerCase() !== 'closed')
+    return openJobs.length || sourceJobs.length
   })
-  const dashboardProgressCards = computed(() => [
+
+  const dashboardTeamMembers = computed(() => {
+    const workspaceUsers = Array.isArray(ctx.workspaceUserDirectory?.value) ? ctx.workspaceUserDirectory.value : []
+    const employeeDirectory = Array.isArray(ctx.employeeDirectory?.value) ? ctx.employeeDirectory.value : []
+    const fallbackTeam = createFallbackTeamMembers(Boolean(ctx.isBusinessEmployeeWorkspaceMode?.value))
+
+    return workspaceUsers.length || employeeDirectory.length
+      ? Math.max(workspaceUsers.length, employeeDirectory.length)
+      : fallbackTeam.length
+  })
+
+  const dashboardApplicantCount = computed(() => dashboardApplicantFeed.value.length)
+  const dashboardNewApplicantCount = computed(() => dashboardApplicantFeed.value.filter((item) => item.isNew).length)
+  const dashboardUnderReviewCount = computed(() =>
+    dashboardApplicantFeed.value.filter((item) => item.statusTone === 'review' || item.statusTone === 'interview').length,
+  )
+  const dashboardResponseRate = computed(() => {
+    const applicantCount = dashboardApplicantCount.value
+    if (!applicantCount) return 0
+
+    return Math.min(100, Math.round(((dashboardUnderReviewCount.value + dashboardNewApplicantCount.value) / applicantCount) * 100))
+  })
+
+  const dashboardSummaryCards = computed(() => ([
     {
-      label: 'Hiring Cycle',
-      value: formatDashboardPercent(dashboardHiringCyclePercent.value),
-      stat: `${dashboardApplicantsUnderReviewCount.value + dashboardInterviewReadyCount.value} / ${businessJobApplications.value.length || 0}`,
-      copy: `${dashboardApplicantsUnderReviewCount.value + dashboardInterviewReadyCount.value} of ${businessJobApplications.value.length} applicants are already moving through screening.`,
-      caption: businessJobApplications.value.length
-        ? 'Applicant pipeline progress'
-        : 'Waiting for applicants',
+      label: 'Open Roles',
+      value: String(dashboardOpenJobs.value),
+      subtitle: 'Positions actively published this cycle.',
+      icon: 'bi bi-briefcase-fill',
       tone: 'emerald',
-      ringStyle: buildDashboardRingStyle(dashboardHiringCyclePercent.value, '#198754', '#63c58f'),
     },
     {
-      label: 'Interview Rate',
-      value: formatDashboardPercent(dashboardInterviewRatePercent.value),
-      stat: `${dashboardInterviewReadyCount.value} ready`,
-      copy: `${dashboardInterviewReadyCount.value} applicants are already interview-ready in this workspace.`,
-      caption: businessJobApplications.value.length
-        ? 'Interview-ready pipeline'
-        : 'No interview-ready applicants yet',
+      label: 'Applicants',
+      value: String(dashboardApplicantCount.value),
+      subtitle: 'Candidates currently visible in the workspace.',
+      icon: 'bi bi-people-fill',
       tone: 'sky',
-      ringStyle: buildDashboardRingStyle(dashboardInterviewRatePercent.value, '#0ea5e9', '#7dd3fc'),
     },
     {
-      label: 'Workspace Health',
-      value: formatDashboardPercent(dashboardWorkspaceHealthPercent.value),
-      copy: `${workspaceUserDirectory.value.length} members, ${postedJobs.value.length} jobs, and ${businessJobApplications.value.length} applications are active in the workspace.`,
-      stat: `${workspaceUserDirectory.value.length + postedJobs.value.length + businessJobApplications.value.length} active records`,
-      caption: 'Workspace readiness',
-      tone: 'violet',
-      ringStyle: buildDashboardRingStyle(dashboardWorkspaceHealthPercent.value, '#7c3aed', '#c4b5fd'),
+      label: 'Response Rate',
+      value: `${dashboardResponseRate.value}%`,
+      subtitle: 'Applicants already touched by the hiring flow.',
+      icon: 'bi bi-graph-up-arrow',
+      tone: 'amber',
     },
-  ])
+    {
+      label: 'Team Members',
+      value: String(dashboardTeamMembers.value),
+      subtitle: 'Users collaborating in this branch workspace.',
+      icon: 'bi bi-diagram-3-fill',
+      tone: 'violet',
+    },
+  ]))
+
+  const dashboardSyncOverview = computed(() => ({
+    badge: ctx.isBusinessEmployeeWorkspaceMode?.value ? 'Employee view' : 'Owner view',
+  }))
+
   const dashboardBarSeries = computed(() => {
-    const totalApplicants = businessJobApplications.value.length
-    const totalJobs = postedJobs.value.length
-    const openJobs = postedJobsSummary.value.openCount
-    const reviewCount = dashboardApplicantsUnderReviewCount.value
-    const interviewCount = dashboardInterviewReadyCount.value
-    const assignedAssessmentCount = dashboardAssignedAssessmentCount.value
-    const assignedTrainingCount = dashboardAssignedTrainingCount.value
+    const applicantCount = Math.max(dashboardApplicantCount.value, 1)
+    const screeningCount = dashboardNewApplicantCount.value || dashboardApplicantCount.value
+    const interviewCount = dashboardApplicantFeed.value.filter((item) => item.statusTone === 'interview').length
+    const activeCount = dashboardUnderReviewCount.value
+    const readyCount = dashboardApplicantFeed.value.filter((item) =>
+      ['approved', 'interview'].includes(item.statusTone),
+    ).length
+    const toPercent = (count) => `${Math.min(100, Math.round((count / applicantCount) * 100))}%`
 
     return [
-      {
-        label: 'Job Post',
-        value: formatDashboardPercent(totalJobs ? (openJobs / totalJobs) * 100 : 0),
-        width: `${clampDashboardPercent(totalJobs ? (openJobs / totalJobs) * 100 : 0)}%`,
-        detail: `${openJobs} of ${totalJobs || 0} open`,
-        tone: 'emerald',
-      },
-      {
-        label: 'Screening',
-        value: formatDashboardPercent(totalApplicants ? (reviewCount / totalApplicants) * 100 : 0),
-        width: `${clampDashboardPercent(totalApplicants ? (reviewCount / totalApplicants) * 100 : 0)}%`,
-        detail: `${reviewCount} applicants in review`,
-        tone: 'amber',
-      },
-      {
-        label: 'Interview',
-        value: formatDashboardPercent(totalApplicants ? (interviewCount / totalApplicants) * 100 : 0),
-        width: `${clampDashboardPercent(totalApplicants ? (interviewCount / totalApplicants) * 100 : 0)}%`,
-        detail: `${interviewCount} interview-ready`,
-        tone: 'sky',
-      },
-      {
-        label: 'Assessment',
-        value: formatDashboardPercent(totalApplicants ? (assignedAssessmentCount / totalApplicants) * 100 : 0),
-        width: `${clampDashboardPercent(totalApplicants ? (assignedAssessmentCount / totalApplicants) * 100 : 0)}%`,
-        detail: `${assignedAssessmentCount} assigned templates`,
-        tone: 'violet',
-      },
-      {
-        label: 'Training',
-        value: formatDashboardPercent(workspaceUserDirectory.value.length ? (assignedTrainingCount / workspaceUserDirectory.value.length) * 100 : 0),
-        width: `${clampDashboardPercent(workspaceUserDirectory.value.length ? (assignedTrainingCount / workspaceUserDirectory.value.length) * 100 : 0)}%`,
-        detail: `${assignedTrainingCount} members in training`,
-        tone: 'teal',
-      },
+      { label: 'Screening', detail: 'Profiles checked in the first pass.', value: toPercent(screeningCount), width: toPercent(screeningCount), tone: 'emerald' },
+      { label: 'Interviewing', detail: 'Candidates moved to interviews.', value: toPercent(interviewCount), width: toPercent(interviewCount), tone: 'sky' },
+      { label: 'Active Review', detail: 'Applicants currently under recruiter review.', value: toPercent(activeCount), width: toPercent(activeCount), tone: 'amber' },
+      { label: 'Ready Next Step', detail: 'Applicants cleared for the next action.', value: toPercent(readyCount), width: toPercent(readyCount), tone: 'violet' },
     ]
   })
-  const dashboardDonutLegend = computed(() => {
-    const sourceItems = [
-      { label: 'Team Members', amount: workspaceUserDirectory.value.length, color: '#ef5da8' },
-      { label: 'Posted Jobs', amount: postedJobs.value.length, color: '#198754' },
-      { label: 'Pending', amount: dashboardPendingApplicantCount.value, color: '#f59e0b' },
-      { label: 'Applicant Total', amount: businessJobApplications.value.length, color: '#29b4ff' },
-    ]
-    const totalAmount = sourceItems.reduce((sum, item) => sum + item.amount, 0)
 
-    return sourceItems.map((item) => ({
-      ...item,
-      countLabel: `${item.amount} ${item.amount === 1 ? 'item' : 'items'}`,
-      value: formatDashboardPercent(totalAmount ? (item.amount / totalAmount) * 100 : 0),
-    }))
-  })
+  const dashboardDonutLegend = computed(() => ([
+    { label: 'Jobs', value: String(dashboardOpenJobs.value), countLabel: 'active openings', color: '#2f8f63' },
+    { label: 'Applicants', value: String(dashboardApplicantCount.value), countLabel: 'in pipeline', color: '#3e7be0' },
+    { label: 'Team', value: String(dashboardTeamMembers.value), countLabel: 'workspace users', color: '#a46ee8' },
+  ]))
+
   const dashboardDonutTotal = computed(() =>
-    dashboardDonutLegend.value.reduce((sum, item) => sum + item.amount, 0),
+    dashboardDonutLegend.value.reduce((total, item) => total + (Number(item.value) || 0), 0),
   )
-  const dashboardDonutStyle = computed(() => {
-    const totalAmount = dashboardDonutTotal.value
-    if (!totalAmount) {
-      return {
-        background: 'conic-gradient(#dbe5dd 0 100%)',
-      }
-    }
 
-    let startPercent = 0
-    const segments = dashboardDonutLegend.value.map((item, index) => {
-      const percentage = totalAmount ? ((item.amount / totalAmount) * 100) : 0
-      const endPercent = index === dashboardDonutLegend.value.length - 1 ? 100 : startPercent + percentage
-      const segment = `${item.color} ${startPercent.toFixed(2)}% ${endPercent.toFixed(2)}%`
-      startPercent = endPercent
-      return segment
+  const dashboardDonutStyle = computed(() => {
+    const total = dashboardDonutTotal.value || 1
+    let offset = 0
+
+    const segments = dashboardDonutLegend.value.map((item) => {
+      const start = offset
+      offset += ((Number(item.value) || 0) / total) * 100
+      return `${item.color} ${start}% ${offset}%`
     })
 
     return {
       background: `conic-gradient(${segments.join(', ')})`,
     }
   })
-  const dashboardSyncOverview = computed(() => {
-    const jobsState = resolveDashboardSyncState(isPostedJobsLoading.value, postedJobsSyncMessage.value)
-    const membersState = resolveDashboardSyncState(isWorkspaceUserDirectoryLoading.value, workspaceUserDirectorySyncMessage.value)
-    const applicantsState = currentBusinessAccountIdentity.value ? 'live' : 'syncing'
-    const templatesState = currentBusinessAccountIdentity.value ? 'live' : 'syncing'
-    const assessmentCount = assessmentTemplateLibrary.value.length
-    const trainingCount = trainingTemplateLibrary.value.length
-    const items = [
-      {
-        label: 'Jobs',
-        value: String(postedJobs.value.length),
-        icon: 'bi bi-briefcase',
-        state: jobsState,
-        stateLabel: resolveDashboardSyncLabel(jobsState),
-      },
-      {
-        label: 'Applicants',
-        value: String(businessJobApplications.value.length),
-        icon: 'bi bi-people',
-        state: applicantsState,
-        stateLabel: resolveDashboardSyncLabel(applicantsState),
-      },
-      {
-        label: 'Members',
-        value: String(workspaceUserDirectory.value.length),
-        icon: 'bi bi-person-badge',
-        state: membersState,
-        stateLabel: resolveDashboardSyncLabel(membersState),
-      },
-      {
-        label: 'Templates',
-        value: String(assessmentCount + trainingCount),
-        icon: 'bi bi-journal-check',
-        state: templatesState,
-        stateLabel: resolveDashboardSyncLabel(templatesState),
-      },
-    ]
-    const issueMessage = postedJobsSyncMessage.value || workspaceUserDirectorySyncMessage.value
-    const hasIssue = items.some((item) => item.state === 'issue')
-    const isSyncing = !hasIssue && items.some((item) => item.state === 'syncing')
+
+  const businessTrendChart = computed(() => {
+    const months = buildDashboardTrendMonths(dashboardOpenJobs.value, dashboardApplicantCount.value)
+    const chartWidth = 720
+    const chartHeight = 260
+    const topPadding = 18
+    const bottomPadding = 28
+    const leftPadding = 18
+    const rightPadding = 18
+    const values = months.flatMap((item) => [item.jobs, item.applicants])
+    const maxValue = Math.max(...values, 1)
+    const usableWidth = chartWidth - leftPadding - rightPadding
+    const usableHeight = chartHeight - topPadding - bottomPadding
+
+    const mapPoint = (value, index, key) => ({
+      key: `${key}-${months[index].key}`,
+      label: months[index].label,
+      x: leftPadding + ((usableWidth / Math.max(months.length - 1, 1)) * index),
+      y: topPadding + (usableHeight - ((value / maxValue) * usableHeight)),
+      isCurrent: index === months.length - 1,
+    })
+
+    const jobPoints = months.map((item, index) => mapPoint(item.jobs, index, 'job'))
+    const applicantPoints = months.map((item, index) => mapPoint(item.applicants, index, 'applicant'))
+    const jobPath = buildLinePath(jobPoints)
+    const applicantPath = buildLinePath(applicantPoints)
+    const jobAreaPath = `${jobPath} L ${jobPoints.at(-1)?.x || chartWidth} ${chartHeight - bottomPadding} L ${jobPoints[0]?.x || leftPadding} ${chartHeight - bottomPadding} Z`
 
     return {
-      eyebrow: 'Firebase Sync',
-      title: hasIssue ? 'Workspace sync needs attention' : isSyncing ? 'Syncing business workspace' : 'Live Firebase workspace',
-      copy: hasIssue
-        ? issueMessage
-        : 'Dashboard numbers update from your Firebase business collections for jobs, applicants, members, and templates.',
-      badge: hasIssue ? 'Check Sync' : isSyncing ? 'Syncing' : 'Live',
-      items,
+      chartWidth,
+      chartHeight,
+      months,
+      jobPoints,
+      applicantPoints,
+      jobPath,
+      applicantPath,
+      jobAreaPath,
+      totalJobs: months.reduce((sum, item) => sum + item.jobs, 0),
+      totalApplicants: months.reduce((sum, item) => sum + item.applicants, 0),
+      highlightCards: [
+        { label: 'Peak Month', value: months.at(-1)?.label || 'Current', detail: 'Most active hiring month.', trend: 'up', tone: 'emerald' },
+        { label: 'Jobs Live', value: String(dashboardOpenJobs.value), detail: 'Open positions right now.', trend: 'up', tone: 'sky' },
+        { label: 'Applicants This Cycle', value: String(dashboardApplicantCount.value), detail: 'Visible in the active queue.', trend: 'up', tone: 'amber' },
+      ],
     }
   })
 
   return {
-    summaryCards,
-    businessTrendChart,
-    dashboardProgressCards,
+    dashboardSummaryCards,
+    dashboardApplicantFeed,
+    dashboardSyncOverview,
     dashboardBarSeries,
     dashboardDonutLegend,
     dashboardDonutTotal,
     dashboardDonutStyle,
-    dashboardSyncOverview,
+    businessTrendChart,
   }
 }
-
-export const createDashboardBindings = (ctx) => computed(() => ({
-  businessCategory: ctx.businessCategory.value,
-  businessName: ctx.businessName.value,
-  currentSection: ctx.currentSection.value,
-  hasUnlockedBusinessWorkspace: ctx.hasUnlockedBusinessWorkspace.value,
-  dashboardSyncOverview: ctx.dashboardSyncOverview.value,
-  dashboardApplicantFeed: ctx.dashboardApplicantFeed.value,
-  summaryCards: ctx.summaryCards.value,
-  businessTrendChart: ctx.businessTrendChart.value,
-  dashboardProgressCards: ctx.dashboardProgressCards.value,
-  dashboardBarSeries: ctx.dashboardBarSeries.value,
-  dashboardDonutLegend: ctx.dashboardDonutLegend.value,
-  dashboardDonutStyle: ctx.dashboardDonutStyle.value,
-  dashboardDonutTotal: ctx.dashboardDonutTotal.value,
-}))

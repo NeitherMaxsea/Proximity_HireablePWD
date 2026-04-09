@@ -12,16 +12,13 @@ const props = defineProps([
   'profileEmail',
   'profileRoleLabel',
   'secondarySectionLabel',
-  'showSubscriptionOnlySidebar',
   'showBusinessSubscriptionShortcut',
   'showBusinessProfileShortcut',
-  'sidebarGroups',
+  'sidebarRenderGroups',
+  'hasDashboardSidebarLink',
   'activeSection',
-  'activeSidebarGroup',
-  'expandedSidebarGroups',
   'openSidebarGroup',
   'handleSidebarSectionClick',
-  'setSidebarLinkRef',
   'getSidebarItemIcon',
   'isPremiumGuideTarget',
   'isLogoutSubmitting',
@@ -41,16 +38,13 @@ const {
   profileEmail,
   profileRoleLabel,
   secondarySectionLabel,
-  showSubscriptionOnlySidebar,
   showBusinessSubscriptionShortcut,
   showBusinessProfileShortcut,
-  sidebarGroups,
+  sidebarRenderGroups,
+  hasDashboardSidebarLink,
   activeSection,
-  activeSidebarGroup,
-  expandedSidebarGroups,
   openSidebarGroup,
   handleSidebarSectionClick,
-  setSidebarLinkRef,
   getSidebarItemIcon,
   isPremiumGuideTarget,
   isLogoutSubmitting,
@@ -58,6 +52,36 @@ const {
   openBusinessSubscriptionSection,
   openBusinessProfileSection,
 } = toRefs(props)
+
+const onSidebarCollapseBeforeEnter = (element) => {
+  element.style.height = '0px'
+  element.style.opacity = '0'
+}
+
+const onSidebarCollapseEnter = (element) => {
+  element.style.height = `${element.scrollHeight}px`
+  element.style.opacity = '1'
+}
+
+const onSidebarCollapseAfterEnter = (element) => {
+  element.style.height = 'auto'
+}
+
+const onSidebarCollapseBeforeLeave = (element) => {
+  element.style.height = `${element.scrollHeight}px`
+  element.style.opacity = '1'
+}
+
+const onSidebarCollapseLeave = (element) => {
+  void element.offsetHeight
+  element.style.height = '0px'
+  element.style.opacity = '0'
+}
+
+const onSidebarCollapseAfterLeave = (element) => {
+  element.style.height = ''
+  element.style.opacity = ''
+}
 </script>
 
 <template>
@@ -82,9 +106,9 @@ const {
 
     <div class="business-sidebar__section-label business-sidebar__section-label--headline">Assigned Modules</div>
 
-    <TransitionGroup name="business-sidebar-reveal" tag="nav" class="business-sidebar__nav" aria-label="Employee workspace sections">
+    <nav class="business-sidebar__nav" aria-label="Employee workspace sections">
       <button
-        v-if="sidebarGroups.some((group) => group.id === 'dashboard' && group.items.some((item) => item.id === 'dashboard'))"
+        v-if="hasDashboardSidebarLink"
         key="dashboard-link"
         type="button"
         class="business-sidebar__link business-sidebar__link--group"
@@ -93,41 +117,50 @@ const {
       >
         <span class="business-sidebar__link-main">
           <i class="bi bi-grid-1x2-fill" aria-hidden="true" />
-          <span>Dashboard</span>
+          <span class="business-sidebar__link-copy">Dashboard</span>
         </span>
       </button>
 
       <div
-        v-for="group in sidebarGroups.filter((entry) => entry.id !== 'dashboard')"
+        v-for="group in sidebarRenderGroups"
         :key="group.id"
         class="business-sidebar__dropdown-group"
       >
         <button
           type="button"
           class="business-sidebar__link business-sidebar__link--group"
-          :class="{ 'is-active-soft': activeSidebarGroup === group.id || group.items.some((item) => item.id === activeSection) }"
-          :aria-expanded="expandedSidebarGroups.includes(group.id) ? 'true' : 'false'"
+          :class="{ 'is-active-soft': group.isActive }"
+          :aria-expanded="group.isExpanded ? 'true' : 'false'"
           @click="openSidebarGroup(group)"
         >
           <span class="business-sidebar__link-main">
             <i :class="group.icon" aria-hidden="true" />
-            <span>{{ group.label }}</span>
+            <span class="business-sidebar__link-copy">{{ group.label }}</span>
           </span>
-          <span class="business-sidebar__chevron" :class="{ 'is-open': expandedSidebarGroups.includes(group.id) }">
-            <i class="bi bi-chevron-down" aria-hidden="true" />
+          <span class="business-sidebar__link-right">
+            <span class="business-sidebar__chevron" :class="{ 'is-open': group.isExpanded }">
+              <i class="bi bi-chevron-down" aria-hidden="true" />
+            </span>
           </span>
         </button>
 
-        <Transition name="business-submenu-collapse">
+        <Transition
+          name="business-sidebar-collapse"
+          @before-enter="onSidebarCollapseBeforeEnter"
+          @enter="onSidebarCollapseEnter"
+          @after-enter="onSidebarCollapseAfterEnter"
+          @before-leave="onSidebarCollapseBeforeLeave"
+          @leave="onSidebarCollapseLeave"
+          @after-leave="onSidebarCollapseAfterLeave"
+        >
           <div
-            v-if="expandedSidebarGroups.includes(group.id)"
+            v-if="group.isExpanded"
             class="business-sidebar__submenu"
             :aria-label="`${group.label} submenu`"
           >
             <button
               v-for="item in group.items"
               :key="item.id"
-              :ref="(element) => setSidebarLinkRef(item.id, element)"
               type="button"
               class="business-sidebar__submenu-item"
               :class="{
@@ -138,13 +171,13 @@ const {
             >
               <span class="business-sidebar__link-main">
                 <i :class="getSidebarItemIcon(item.id)" aria-hidden="true" />
-                <span>{{ item.label }}</span>
+                <span class="business-sidebar__link-copy">{{ item.label }}</span>
               </span>
             </button>
           </div>
         </Transition>
       </div>
-    </TransitionGroup>
+    </nav>
 
     <div class="business-sidebar__spacer" />
 
@@ -161,7 +194,7 @@ const {
         >
           <span class="business-sidebar__link-main">
             <i class="bi bi-stars" aria-hidden="true" />
-            <span>Subscriptions</span>
+            <span class="business-sidebar__link-copy">Subscriptions</span>
           </span>
         </button>
         <button
@@ -173,13 +206,13 @@ const {
         >
           <span class="business-sidebar__link-main">
             <i class="bi bi-person-circle" aria-hidden="true" />
-            <span>Edit Profile</span>
+            <span class="business-sidebar__link-copy">Edit Profile</span>
           </span>
         </button>
         <button type="button" class="business-sidebar__footer-link" :disabled="isLogoutSubmitting" @click="openLogoutConfirm">
           <span class="business-sidebar__link-main">
             <i class="bi bi-box-arrow-right" aria-hidden="true" />
-            <span>{{ isLogoutSubmitting ? 'Logging Out...' : 'Log Out' }}</span>
+            <span class="business-sidebar__link-copy">{{ isLogoutSubmitting ? 'Logging Out...' : 'Log Out' }}</span>
           </span>
         </button>
       </div>

@@ -6,40 +6,32 @@
   align-items: stretch;
   justify-content: stretch;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 14% 18%, rgba(66, 152, 102, 0.18), transparent 22%),
-    radial-gradient(circle at 82% 16%, rgba(243, 190, 121, 0.08), transparent 18%),
-    linear-gradient(180deg, #0a1c14 0%, #07150f 100%);
-  background-size: 120% 120%, 120% 120%, 100% 100%;
-  animation: roleBackgroundDrift 24s ease-in-out infinite alternate;
+  background: linear-gradient(180deg, #f7f3eb 0%, #f1ece3 100%);
   -webkit-user-select: none;
   user-select: none;
-}
-
-.role-auth-page::before,
-.role-auth-page::after {
-  content: "";
-  position: absolute;
-  border-radius: 999px;
-  pointer-events: none;
+  isolation: isolate;
 }
 
 .role-auth-page::before {
-  width: 360px;
-  height: 360px;
-  top: -120px;
-  right: -90px;
-  background: radial-gradient(circle, rgba(87, 138, 102, 0.24) 0%, rgba(87, 138, 102, 0) 70%);
-  animation: roleFloatOne 16s ease-in-out infinite;
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 18, 16, 0);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.32s ease,
+    background-color 0.32s ease;
+  z-index: 3;
 }
 
 .role-auth-page::after {
-  width: 290px;
-  height: 290px;
-  bottom: -110px;
-  left: -70px;
-  background: radial-gradient(circle, rgba(243, 190, 121, 0.18) 0%, rgba(243, 190, 121, 0) 70%);
-  animation: roleFloatTwo 20s ease-in-out infinite;
+  content: none;
+}
+
+.role-auth-page.has-hovered-role::before {
+  background: rgba(12, 18, 16, 0.28);
+  opacity: 1;
 }
 
 .role-auth-container {
@@ -53,17 +45,15 @@
   border: 0;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: none;
-  backdrop-filter: blur(10px);
   position: relative;
   z-index: 1;
-  animation: roleShellFadeIn 0.82s cubic-bezier(0.22, 1, 0.36, 1) 0.06s both;
 }
 
 .role-back-btn {
   position: fixed;
   top: 1.35rem;
   left: 1.35rem;
-  z-index: 55;
+  z-index: 6;
   display: inline-flex;
   align-items: center;
   gap: 0.55rem;
@@ -114,8 +104,7 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(247, 250, 248, 0.98) 100%);
+  background: #ffffff;
   border-right: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -123,8 +112,13 @@
   scrollbar-width: none;
   opacity: 0;
   visibility: hidden;
-  transform: translateY(14px);
-  transition: opacity 0.35s ease, transform 0.35s ease;
+  transform: translate3d(0, 24px, 0);
+  transition:
+    opacity 0.52s ease,
+    transform 0.52s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0.52s;
+  position: relative;
+  z-index: 1;
 }
 
 .role-auth-right::-webkit-scrollbar {
@@ -135,7 +129,8 @@
 .role-auth-right.is-visible {
   visibility: visible;
   opacity: 1;
-  transform: translateY(0);
+  transform: translate3d(0, 0, 0);
+  transition-delay: 0s;
 }
 
 .role-logo-container {
@@ -151,9 +146,14 @@
 
 .role-form-heading {
   width: min(42rem, 100%);
-  margin: 1.1rem auto 2rem;
+  margin: 0 auto 2rem;
   padding: 0;
   text-align: center;
+  opacity: 0;
+  transform: translate3d(0, 26px, 0);
+  transition:
+    opacity 0.52s ease,
+    transform 0.52s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .role-form-h2 {
@@ -183,6 +183,12 @@
   margin: 0 auto;
 }
 
+.role-auth-right.is-visible .role-form-heading {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  transition-delay: 0.08s;
+}
+
 .role-tutorial-callout {
   display: grid;
   justify-items: center;
@@ -190,6 +196,17 @@
   width: min(1280px, 100%);
   margin: 1.35rem auto 0;
   padding: 0.2rem 0 0;
+  opacity: 0;
+  transform: translate3d(0, 22px, 0);
+  transition:
+    opacity 0.5s ease,
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.role-auth-right.is-visible .role-tutorial-callout {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+  transition-delay: 0.34s;
 }
 
 .role-tutorial-callout__text {
@@ -232,12 +249,17 @@
   gap: 0;
   min-height: 28rem;
   transition:
+    opacity 0.52s ease,
+    transform 0.52s cubic-bezier(0.22, 1, 0.36, 1),
     transform 0.22s ease,
     border-color 0.22s ease,
     box-shadow 0.22s ease,
     background-color 0.22s ease;
   overflow: hidden;
   position: relative;
+  opacity: 0;
+  transform: translate3d(0, 28px, 0);
+  z-index: 1;
 }
 
 .role-option-card::before {
@@ -271,17 +293,30 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: 0;
+  opacity: 1;
   background:
-    radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0));
-  transition: opacity 0.22s ease;
+    linear-gradient(180deg, rgba(15, 23, 42, 0.02), rgba(15, 23, 42, 0.03)),
+    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 34%);
+  transition: opacity 0.22s ease, background 0.22s ease;
 }
 
 .role-option-card:hover {
   transform: translateY(-3px);
   border-color: #c8d9ce;
   box-shadow: 0 20px 34px rgba(23, 35, 29, 0.1);
+}
+
+.role-auth-right.is-visible .role-option-card {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+.role-auth-right.is-visible .role-option-card:nth-child(1) {
+  transition-delay: 0.14s;
+}
+
+.role-auth-right.is-visible .role-option-card:nth-child(2) {
+  transition-delay: 0.22s;
 }
 
 .role-option-card:hover::before,
@@ -297,6 +332,18 @@
 .role-option-card:focus-visible::before,
 .role-option-card:focus-within::before {
   left: 104%;
+}
+
+.role-option-card:hover::after,
+.role-option-card:focus-visible::after,
+.role-option-card:focus-within::after {
+  background:
+    linear-gradient(180deg, rgba(15, 23, 42, 0.04), rgba(15, 23, 42, 0.06)),
+    radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 36%);
+}
+
+.role-auth-page.has-hovered-role .role-option-card.is-hovered {
+  z-index: 5;
 }
 
 .role-option-card:focus-visible {
@@ -575,45 +622,6 @@
   color: #b45f41;
 }
 
-.role-route-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 30;
-  display: grid;
-  place-items: center;
-  background: rgba(255, 255, 255, 0.68);
-}
-
-.role-route-overlay__spinner {
-  width: 11px;
-  aspect-ratio: 1;
-  background: #11442f;
-  border-radius: 999px;
-  animation: roleRouteLoader 1s infinite linear alternate;
-}
-
-@keyframes roleRouteLoader {
-  0% {
-    box-shadow: 20px 0 #11442f, -20px 0 rgba(17, 68, 47, 0.14);
-    background: #11442f;
-  }
-
-  33% {
-    box-shadow: 20px 0 #11442f, -20px 0 rgba(17, 68, 47, 0.14);
-    background: rgba(17, 68, 47, 0.14);
-  }
-
-  66% {
-    box-shadow: 20px 0 rgba(17, 68, 47, 0.14), -20px 0 #11442f;
-    background: rgba(17, 68, 47, 0.14);
-  }
-
-  100% {
-    box-shadow: 20px 0 rgba(17, 68, 47, 0.14), -20px 0 #11442f;
-    background: #11442f;
-  }
-}
-
 @keyframes roleShellFadeIn {
   from {
     opacity: 0;
@@ -660,16 +668,6 @@
     transform: translate3d(22px, -14px, 0) scale(1.05);
     opacity: 0.72;
   }
-}
-
-.role-route-overlay-enter-active,
-.role-route-overlay-leave-active {
-  transition: opacity 0.18s ease;
-}
-
-.role-route-overlay-enter-from,
-.role-route-overlay-leave-to {
-  opacity: 0;
 }
 
 @media (max-width: 980px) {
@@ -819,13 +817,7 @@
   .role-auth-page::before,
   .role-auth-page::after,
   .role-auth-container,
-  .role-auth-right,
-  .role-route-overlay__spinner {
+  .role-auth-right {
     animation: none;
-  }
-
-  .role-route-overlay-enter-active,
-  .role-route-overlay-leave-active {
-    transition: none;
   }
 }

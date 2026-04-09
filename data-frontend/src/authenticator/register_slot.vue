@@ -224,7 +224,6 @@ const isDasmarinasCaviteAddress = (value) => {
   return normalizedAddress.includes('dasmarinas') && normalizedAddress.includes('cavite')
 }
 const companyVerificationCertified = ref(false)
-let timerId
 let stepStatusTimerId
 let draftSaveTimerId
 let notifyTimerId
@@ -811,13 +810,6 @@ const hasStartedRegistration = computed(() => {
 
   return isEmployerRegistration.value ? employerDirty : applicantDirty || accountDirty
 })
-
-const clearTimer = () => {
-  if (timerId) {
-    window.clearTimeout(timerId)
-    timerId = null
-  }
-}
 
 const clearStepStatusTimer = () => {
   if (stepStatusTimerId) {
@@ -2074,11 +2066,17 @@ const closeNotify = () => {
   }, 180)
 }
 
-const navigateSafely = (path) => {
+const navigateSafely = async (path) => {
   if (isNavigating.value) return
   isNavigating.value = true
-  clearTimer()
-  timerId = window.setTimeout(() => router.push(path), 180)
+  try {
+    const navigationResult = await router.push(path)
+    if (navigationResult) {
+      isNavigating.value = false
+    }
+  } catch {
+    isNavigating.value = false
+  }
 }
 
 watch(
@@ -2833,7 +2831,6 @@ watch(registerPageTitle, (value) => {
 })
 
 onBeforeUnmount(() => {
-  clearTimer()
   clearStepStatusTimer()
   clearDraftSaveTimer()
   clearNotifyTimer()
@@ -2857,12 +2854,6 @@ onBeforeUnmount(() => {
       <i class="bi bi-arrow-left" aria-hidden="true" />
       <span>Back to Roles</span>
     </button>
-
-    <transition name="register-route-overlay">
-      <div v-if="isNavigating" class="register-route-overlay" aria-hidden="true">
-        <div class="register-route-overlay__spinner" />
-      </div>
-    </transition>
 
     <transition name="reg-notify-popup">
       <div v-if="toast" class="reg-notify-banner" :class="toast.kind" role="status" aria-live="polite">
@@ -2913,7 +2904,6 @@ onBeforeUnmount(() => {
 
     <div v-if="loading || waitingApproval || stepTransitionLoading" class="reg-alert-backdrop" role="dialog" aria-modal="true">
       <div class="reg-alert-card reg-alert-card-loading">
-        <div class="reg-proceed-loader" aria-hidden="true" />
         <h3 class="reg-alert-title">
           {{
             waitingApproval
@@ -3757,11 +3747,7 @@ onBeforeUnmount(() => {
                     aria-live="polite"
                     aria-label="Loading next employer registration step"
                   >
-                    <span class="reg-employer-type-dots" aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
+                    <p class="reg-employer-type-loading-text">Preparing the next step...</p>
                   </div>
                 </template>
 

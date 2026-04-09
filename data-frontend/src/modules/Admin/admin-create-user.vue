@@ -1,11 +1,16 @@
 <script setup>
 import { computed, ref } from 'vue'
+import RenderLoader from '@/components/renderloader.vue'
 import { createAdminManagedAccount } from '@/lib/auth'
 
 const emit = defineEmits(['created', 'toast'])
 
 const accountType = ref('applicant')
 const isSubmitting = ref(false)
+const submitPhase = ref('')
+const showRenderLoader = ref(false)
+const renderLoaderSuccess = ref(false)
+const pendingCreatedPayload = ref(null)
 const applicantPwdIdFrontFile = ref(null)
 const applicantPwdIdBackFile = ref(null)
 
@@ -154,6 +159,7 @@ const handleBusinessContactInput = () => {
 }
 
 const switchAccountType = (nextType) => {
+  if (isSubmitting.value) return
   if (!['business', 'applicant'].includes(nextType)) return
   accountType.value = nextType
 }
@@ -192,6 +198,14 @@ const resetActiveForm = () => {
   }
 }
 
+const submittingStateCopy = computed(() => {
+  if (!showRenderLoader.value && !renderLoaderSuccess.value) return ''
+  if (submitPhase.value === 'uploading-files') return 'Uploading applicant files and preparing the account...'
+  if (submitPhase.value === 'saving-profile') return 'Saving the new account profile and permissions...'
+  if (submitPhase.value === 'finishing') return 'Finalizing the new managed account...'
+  return 'Creating the new managed account...'
+})
+
 const submitCreateUser = async () => {
   if (accountType.value === 'business') {
     businessForm.value.contactNumber = normalizeBusinessContactNumber(businessForm.value.contactNumber)
@@ -202,6 +216,9 @@ const submitCreateUser = async () => {
   }
 
   isSubmitting.value = true
+  showRenderLoader.value = true
+  renderLoaderSuccess.value = false
+  submitPhase.value = 'creating-account'
 
   try {
     const payload = {
@@ -215,7 +232,14 @@ const submitCreateUser = async () => {
       payload.age = calculateAge(payload.birthdate)
     }
 
+    if (accountType.value === 'applicant' && (payload.pwdIdFrontFile || payload.pwdIdBackFile)) {
+      submitPhase.value = 'uploading-files'
+    } else {
+      submitPhase.value = 'saving-profile'
+    }
+
     const result = await createAdminManagedAccount(payload)
+    submitPhase.value = 'finishing'
     const createdUser = result?.user || {}
     const createdName = String(
       createdUser.name
@@ -225,19 +249,35 @@ const submitCreateUser = async () => {
     ).trim()
 
     const successMessage = `${createdName} was created successfully.`
-    resetActiveForm()
-    emit('created', {
+    pendingCreatedPayload.value = {
       accountType: accountType.value,
       user: createdUser,
-      message: successMessage,
+      message: '',
       kind: 'success',
       title: 'User Created',
-    })
+    }
+    renderLoaderSuccess.value = true
+    showRenderLoader.value = false
   } catch (error) {
+    showRenderLoader.value = false
+    renderLoaderSuccess.value = false
+    pendingCreatedPayload.value = null
     showToast(error instanceof Error ? error.message : 'Unable to create the user right now.', 'error', 'Create User Failed')
   } finally {
     isSubmitting.value = false
+    submitPhase.value = ''
   }
+}
+
+const handleRenderLoaderHidden = () => {
+  if (pendingCreatedPayload.value) {
+    const payload = pendingCreatedPayload.value
+    pendingCreatedPayload.value = null
+    resetActiveForm()
+    emit('created', payload)
+  }
+
+  renderLoaderSuccess.value = false
 }
 </script>
 
@@ -254,6 +294,7 @@ const submitCreateUser = async () => {
           type="button"
           class="admin-create-user__switch-button"
           :class="{ 'is-active': accountType === 'applicant' }"
+          :disabled="isSubmitting"
           @click="switchAccountType('applicant')"
         >
           Applicant
@@ -262,6 +303,7 @@ const submitCreateUser = async () => {
           type="button"
           class="admin-create-user__switch-button"
           :class="{ 'is-active': accountType === 'business' }"
+          :disabled="isSubmitting"
           @click="switchAccountType('business')"
         >
           Business
@@ -274,6 +316,18 @@ const submitCreateUser = async () => {
         <h3 class="admin-create-user__sheet-title">{{ sheetTitle }}</h3>
         <p class="admin-create-user__sheet-copy">{{ sheetCopy }}</p>
       </header>
+
+      <RenderLoader
+        :visible="showRenderLoader"
+        :success="renderLoaderSuccess"
+        :message="submittingStateCopy"
+        success-message="Successfully saved the new account profile and permissions."
+        :toast-visible="renderLoaderSuccess"
+        toast-title="User Created"
+        :toast-message="renderLoaderSuccess ? 'Successfully saved the new account profile and permissions.' : ''"
+        toast-kind="success"
+        @hidden="handleRenderLoaderHidden"
+      />
 
       <Transition name="admin-create-user__panel" mode="out-in">
         <div :key="accountType" class="admin-create-user__panel">
@@ -575,6 +629,7 @@ const submitCreateUser = async () => {
 }
 
 .admin-create-user__sheet {
+  position: relative;
   display: grid;
   gap: 0.85rem;
   padding: 1.15rem;
@@ -582,6 +637,7 @@ const submitCreateUser = async () => {
   border-radius: 1rem;
   background: #ffffff;
   box-shadow: 0 2px 10px rgba(16, 24, 40, 0.04);
+  overflow: hidden;
 }
 
 .admin-create-user__sheet-header h3 {
@@ -717,15 +773,6 @@ const submitCreateUser = async () => {
 
 .admin-create-user__phone-code {
   min-width: 0;
-}
-
-.admin-create-user__message {
-  margin: 0;
-  padding: 0.72rem 0.82rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 0.55rem;
-  font-size: 0.76rem;
-  font-weight: 600;
 }
 
 .admin-create-user__message--error {

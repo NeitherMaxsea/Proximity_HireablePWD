@@ -3,22 +3,11 @@ import '@fontsource/inter/400.css'
 import '@fontsource/inter/500.css'
 import '@fontsource/inter/600.css'
 import '@fontsource/inter/700.css'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, defineComponent, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onAuthStateChanged, signOut } from 'firebase/auth'
 import { doc, getDoc } from 'firebase/firestore'
 import { useRouter } from 'vue-router'
-import AdminAllUser from '@/modules/Admin/admin-all-user.vue'
-import AdminApplicantStorage from '@/modules/Admin/admin-applicant-storage.vue'
-import AdminBusinessStorage from '@/modules/Admin/admin-business-storage.vue'
-import AdminCreatePlan from '@/modules/Admin/admin-create-plan.vue'
-import AdminCreateUser from '@/modules/Admin/admin-create-user.vue'
-import AdminApplicantList from '@/modules/Admin/admin-applicantlist.vue'
-import AdminDeletionHistory from '@/modules/Admin/admin-deletion-history.vue'
-import AdminEmployeeList from '@/modules/Admin/admin-employeelist.vue'
-import AdminJobPostList from '@/modules/Admin/admin-job-post-list.vue'
 import AdminNavbar from '@/modules/Admin/adminnavbar.vue'
-import AdminPreviewPlan from '@/modules/Admin/admin-preview-plan.vue'
-import AdminRoleBasedControlSytem from '@/modules/Admin/admin-rolebasedcontrolsytem.vue'
 import AdminSidebar from '@/modules/Admin/admin_sidebar.vue'
 import logoPwd from '@/assets/logo-pwd.png'
 import pwdWordmark from '@/assets/pwdlogo.png'
@@ -39,6 +28,51 @@ import {
 } from '@/lib/business_payment_history'
 import { getAllJobs, getPublicJobs, subscribeToAllJobs, subscribeToPublicJobs } from '@/lib/jobs'
 import { auth, db } from '@/firebase'
+
+const createAdminSectionLoader = (label) => defineComponent({
+  name: 'AdminSectionLoader',
+  setup() {
+    return () => h(
+      'div',
+      {
+        class: 'admin-async-loader',
+        role: 'status',
+        'aria-live': 'polite',
+        'aria-label': `Loading ${label}`,
+      },
+      [
+        h(
+          'span',
+          { class: 'admin-loading-dots admin-async-loader__dots', 'aria-hidden': 'true' },
+          [
+            h('span'),
+            h('span'),
+            h('span'),
+          ],
+        ),
+        h('span', { class: 'admin-async-loader__label' }, `Loading ${label}`),
+      ],
+    )
+  },
+})
+
+const lazyAdminSection = (loader, label) => defineAsyncComponent({
+  loader,
+  delay: 120,
+  loadingComponent: createAdminSectionLoader(label),
+})
+
+const AdminAllUser = lazyAdminSection(() => import('@/modules/Admin/admin-all-user.vue'), 'user overview')
+const AdminApplicantStorage = lazyAdminSection(() => import('@/modules/Admin/admin-applicant-storage.vue'), 'applicant storage')
+const AdminBusinessStorage = lazyAdminSection(() => import('@/modules/Admin/admin-business-storage.vue'), 'business storage')
+const AdminCreatePlan = lazyAdminSection(() => import('@/modules/Admin/admin-create-plan.vue'), 'plan management')
+const AdminCreateUser = lazyAdminSection(() => import('@/modules/Admin/admin-create-user.vue'), 'user creation')
+const AdminApplicantList = lazyAdminSection(() => import('@/modules/Admin/admin-applicantlist.vue'), 'applicant records')
+const AdminDeletionHistory = lazyAdminSection(() => import('@/modules/Admin/admin-deletion-history.vue'), 'deletion history')
+const AdminEmployeeList = lazyAdminSection(() => import('@/modules/Admin/admin-employeelist.vue'), 'business records')
+const AdminJobPostList = lazyAdminSection(() => import('@/modules/Admin/admin-job-post-list.vue'), 'job posts')
+const AdminPreviewPlan = lazyAdminSection(() => import('@/modules/Admin/admin-preview-plan.vue'), 'plan preview')
+const AdminRoleBasedControlSytem = lazyAdminSection(() => import('@/modules/Admin/admin-rolebasedcontrolsytem.vue'), 'role permissions')
 
 const router = useRouter()
 const LOGOUT_TOAST_KEY = 'showLoggedOutToast'
@@ -676,10 +710,6 @@ const dashboardSummaryCards = computed(() => {
   ]
 })
 
-const dashboardStaggerStyle = (index, baseDelay = 0) => ({
-  '--dashboard-enter-delay': `${baseDelay + (index * 90)}ms`,
-})
-
 const approvedAccountName = (record) =>
   String(
     record?.name
@@ -711,7 +741,7 @@ const formatRecordCount = (value) => {
 }
 
 const formatApprovedAccountId = (value) => {
-  const normalized = String(value || '').trim()
+  const normalized = String(value || '').trim().replace(/^#\s*/, '')
   return normalized || 'No ID'
 }
 
@@ -1065,25 +1095,25 @@ const adminShellStyle = computed(() => {
         contentGlow: 'rgba(103, 211, 159, 0.12)',
         contentTop: 'rgba(9, 15, 27, 0.96)',
         contentBottom: 'rgba(4, 8, 18, 0.98)',
-        surface: 'rgba(15, 23, 42, 0.92)',
-        surfaceMuted: 'rgba(30, 41, 59, 0.86)',
-        surfaceElevated: 'rgba(15, 23, 42, 0.9)',
-        surfaceInset: 'rgba(248, 252, 249, 0.08)',
-        hover: 'rgba(51, 65, 85, 0.48)',
-        hoverStrong: 'rgba(30, 41, 59, 0.82)',
+        surface: 'rgba(8, 15, 28, 0.96)',
+        surfaceMuted: 'rgba(12, 20, 36, 0.98)',
+        surfaceElevated: 'rgba(10, 18, 33, 0.98)',
+        surfaceInset: 'rgba(59, 130, 246, 0.08)',
+        hover: 'rgba(30, 64, 175, 0.12)',
+        hoverStrong: 'rgba(30, 64, 175, 0.18)',
         overlay: 'rgba(2, 6, 23, 0.72)',
         textPrimary: '#f8fafc',
-        textSecondary: '#cbd5e1',
-        textMuted: '#94a3b8',
-        border: 'rgba(148, 163, 184, 0.18)',
-        borderStrong: 'rgba(148, 163, 184, 0.28)',
+        textSecondary: '#e2e8f0',
+        textMuted: '#cbd5e1',
+        border: 'rgba(96, 165, 250, 0.16)',
+        borderStrong: 'rgba(148, 163, 184, 0.22)',
         shadowSoft: '0 20px 40px rgba(2, 6, 23, 0.42)',
         shadowStrong: '0 24px 56px rgba(2, 6, 23, 0.56)',
-        inputBg: 'rgba(15, 23, 42, 0.9)',
+        inputBg: 'rgba(8, 15, 28, 0.98)',
         inputBorder: 'rgba(148, 163, 184, 0.22)',
         inputText: '#f8fafc',
         inputPlaceholder: '#94a3b8',
-        icon: '#dbe4f0',
+        icon: '#dbeafe',
       }
     : {
         accent: palette.accentLight,
@@ -1168,9 +1198,21 @@ watch(
   { immediate: true },
 )
 
-const unreadNotificationCount = computed(() =>
-  adminNotifications.value.filter((notification) => notification.read !== true).length,
-)
+
+// Only count notifications as read if the notification menu is opened
+const unreadNotificationCount = computed(() => {
+  return adminNotifications.value.filter((notification) => notification.read !== true).length;
+});
+
+// Mark notifications as read when the notification menu is opened
+watch(notificationMenuOpen, (open) => {
+  if (open) {
+    adminNotifications.value = adminNotifications.value.map((notification) => ({
+      ...notification,
+      read: true,
+    }));
+  }
+});
 
 const recentAdminNotifications = computed(() =>
   adminNotifications.value.slice(0, 6),
@@ -1181,10 +1223,15 @@ const formatNotificationBadge = (value) => {
   return count > 99 ? '99+' : String(count)
 }
 
+// Only show as "new" if applicant is recent and still pending
 const recentApplicantIds = computed(() =>
   normalizeIdList(
     (Array.isArray(adminProfiles.value.applicants) ? adminProfiles.value.applicants : [])
-      .filter((record) => isRecentRecordDate(record?.created_at || record?.createdAt || record?.submitted_at))
+      .filter((record) => {
+        const isRecent = isRecentRecordDate(record?.created_at || record?.createdAt || record?.submitted_at);
+        const isPending = normalizeStatusValue(record?.approval_status) === 'pending';
+        return isRecent && isPending;
+      })
       .map((record) => record?.id),
   ),
 )
@@ -1213,57 +1260,54 @@ const recentAdminJobIds = computed(() =>
 const applicantListSidebarCount = computed(() => {
   if (activeAdminView.value === 'applicant-list') return 0
 
-  const seenIds = new Set(seenApplicantIds.value)
   return (Array.isArray(adminProfiles.value.applicants) ? adminProfiles.value.applicants : [])
     .filter((record) => {
       const applicantId = String(record?.id || '').trim()
-      return applicantId
-        && normalizeStatusValue(record?.approval_status) === 'pending'
-        && !seenIds.has(applicantId)
+      return applicantId && normalizeStatusValue(record?.approval_status) === 'pending'
     })
     .length
 })
 
 const businessListSidebarCount = computed(() => {
   if (['employee-list', 'all-user'].includes(activeAdminView.value)) return 0
-  const seenIds = new Set(seenEmployerIds.value)
+
   return (Array.isArray(adminProfiles.value.employers) ? adminProfiles.value.employers : [])
     .filter((record) => {
       const employerId = String(record?.id || '').trim()
-      return employerId && !seenIds.has(employerId)
+      return employerId
     })
     .length
 })
 
 const paymentHistorySidebarCount = computed(() => {
   if (activeAdminView.value === 'payment-history') return 0
-  const seenIds = new Set(seenPaymentEntryIds.value)
+
   return adminPaymentHistory.value
     .filter((entry) => {
       const entryId = String(entry?.id || '').trim()
-      return entryId && !seenIds.has(entryId)
+      return entryId
     })
     .length
 })
 
 const allJobPostSidebarCount = computed(() => {
   if (['all-job-post', 'test-job-post'].includes(activeAdminView.value)) return 0
-  const seenIds = new Set(seenJobPostIds.value)
+
   return (Array.isArray(adminJobPosts.value) ? adminJobPosts.value : [])
     .filter((entry) => {
       const jobId = String(entry?.id || '').trim()
-      return jobId && !seenIds.has(jobId)
+      return jobId
     })
     .length
 })
 
 const adminLogsSidebarCount = computed(() => {
   if (activeAdminView.value === 'logs') return 0
-  const seenIds = new Set(seenActivityLogIds.value)
+
   return (Array.isArray(activityLogs.value) ? activityLogs.value : [])
     .filter((entry) => {
       const logId = String(entry?.id || '').trim()
-      return logId && !seenIds.has(logId)
+      return logId
     })
     .length
 })
@@ -2047,9 +2091,6 @@ watch(activeAdminView, (nextView) => {
 
 const handleAdminManagedAccountCreated = (payload) => {
   const message = String(payload?.message || '').trim()
-  const nextView = String(payload?.accountType || '').trim().toLowerCase() === 'business'
-    ? 'employee-list'
-    : 'applicant-list'
 
   if (message) {
     showAdminToast(
@@ -2058,8 +2099,6 @@ const handleAdminManagedAccountCreated = (payload) => {
       String(payload?.title || '').trim() || 'User Created',
     )
   }
-
-  setAdminView(nextView)
 }
 
 const handleAdminManagedAccountToast = (payload) => {
@@ -3125,16 +3164,24 @@ onBeforeUnmount(() => {
           </div>
         </transition>
 
-        <transition name="admin-view" mode="out-in" appear>
+        <div v-if="isInitialAdminLoading" class="admin-initial-loader" role="status" aria-live="polite" aria-label="Loading admin dashboard">
+          <span class="admin-loading-dots" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </div>
+
+        <transition name="admin-content-fade" mode="out-in">
           <div v-if="!isInitialAdminLoading" :key="activeAdminView" class="admin-view-stage">
             <template v-if="activeAdminView === 'dashboard'">
               <section class="dashboard-summary-grid" aria-label="Dashboard summary">
                 <article
                   v-for="(card, cardIndex) in dashboardSummaryCards"
                   :key="card.label"
-                  class="dashboard-summary-card dashboard-summary-card--enter"
+                  class="dashboard-summary-card dashboard-motion-card"
                   :class="`dashboard-summary-card--${card.tone}`"
-                  :style="dashboardStaggerStyle(cardIndex)"
+                  :style="{ '--dashboard-enter-delay': `${100 + (cardIndex * 70)}ms` }"
                 >
                   <div class="dashboard-summary-card__top">
                     <span class="dashboard-summary-card__label">
@@ -3153,8 +3200,8 @@ onBeforeUnmount(() => {
 
               <section class="dashboard-analytics-grid">
                 <article
-                  class="dashboard-panel dashboard-panel--enter dashboard-chart-panel"
-                  :style="dashboardStaggerStyle(0, 320)"
+                  class="dashboard-panel dashboard-chart-panel dashboard-motion-card"
+                  style="--dashboard-enter-delay: 320ms"
                 >
                   <div class="dashboard-panel__head">
                     <div>
@@ -3223,8 +3270,8 @@ onBeforeUnmount(() => {
                 </article>
 
                 <article
-                  class="dashboard-panel dashboard-panel--enter dashboard-distribution-panel"
-                  :style="dashboardStaggerStyle(1, 320)"
+                  class="dashboard-panel dashboard-distribution-panel dashboard-motion-card"
+                  style="--dashboard-enter-delay: 400ms"
                 >
                   <div class="dashboard-panel__head">
                     <div>
@@ -3264,8 +3311,8 @@ onBeforeUnmount(() => {
 
               <section class="dashboard-approved-grid">
                 <article
-                  class="dashboard-panel dashboard-panel--enter"
-                  :style="dashboardStaggerStyle(2, 320)"
+                  class="dashboard-panel dashboard-motion-card"
+                  style="--dashboard-enter-delay: 480ms"
                 >
                   <div class="dashboard-panel__head">
                     <div>
@@ -3457,7 +3504,7 @@ onBeforeUnmount(() => {
               :employees="adminProfiles.employers"
             />
 
-            <section v-else-if="activeAdminView === 'logs'" class="dashboard-panel admin-logs-panel">
+            <section v-else-if="activeAdminView === 'logs'" class="dashboard-panel admin-logs-panel dashboard-motion-card" style="--dashboard-enter-delay: 140ms">
               <div class="dashboard-panel__head">
                 <div>
                   <h2>Admin Logs</h2>
@@ -3515,7 +3562,7 @@ onBeforeUnmount(() => {
               </div>
             </section>
 
-            <section v-else-if="activeAdminView === 'payment-history'" class="dashboard-panel admin-payment-history-panel">
+            <section v-else-if="activeAdminView === 'payment-history'" class="dashboard-panel admin-payment-history-panel dashboard-motion-card" style="--dashboard-enter-delay: 140ms">
               <div class="dashboard-panel__head">
                 <div>
                   <h2>Payment History</h2>
@@ -3653,6 +3700,31 @@ onBeforeUnmount(() => {
                 No payment history records match the current filter.
               </div>
             </section>
+
+            <section v-else class="dashboard-panel admin-payment-history-panel dashboard-motion-card" style="--dashboard-enter-delay: 140ms">
+              <div class="dashboard-panel__head">
+                <div>
+                  <h2>Admin Content Unavailable</h2>
+                  <p class="dashboard-panel__subcopy">The selected admin section could not be rendered, so the dashboard view is being kept safe.</p>
+                </div>
+                <span class="dashboard-panel__pill">Fallback</span>
+              </div>
+
+              <div class="dashboard-approved-empty">
+                This admin view is currently unavailable: <strong>{{ activeAdminView }}</strong>
+              </div>
+
+              <div class="admin-payment-row__actions" style="margin-top: 1rem;">
+                <button
+                  type="button"
+                  class="dashboard-payment-action-btn"
+                  aria-label="Return to dashboard"
+                  @click="setAdminView('dashboard')"
+                >
+                  <i class="bi bi-house-door" aria-hidden="true" />
+                </button>
+              </div>
+            </section>
           </div>
         </transition>
       </section>
@@ -3677,6 +3749,14 @@ body[data-admin-color-mode='dark'] .admin-view-stage [class*='-surface'],
 body[data-admin-color-mode='dark'] .admin-view-stage [class*='__surface'],
 body[data-admin-color-mode='dark'] .admin-view-stage [class*='-toolbar'],
 body[data-admin-color-mode='dark'] .admin-view-stage [class*='__toolbar'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-header'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__header'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-head'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__head'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-list'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__list'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-table'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__table'],
 body[data-admin-color-mode='dark'] .admin-view-stage [class*='-search'],
 body[data-admin-color-mode='dark'] .admin-view-stage [class*='search-field'],
 body[data-admin-color-mode='dark'] .admin-view-stage [class*='-summary'],
@@ -3705,6 +3785,7 @@ body[data-admin-color-mode='dark'] .admin-view-stage [class*='-shell'],
 body[data-admin-color-mode='dark'] [class*='-modal__panel'],
 body[data-admin-color-mode='dark'] [class*='-modal__empty'] {
   background: var(--admin-bg-surface) !important;
+  background-image: none !important;
   color: var(--admin-text-primary) !important;
   border-color: var(--admin-border-color) !important;
   box-shadow: var(--admin-shadow-soft) !important;
@@ -3731,6 +3812,7 @@ body[data-admin-color-mode='dark'] [class*='-modal__copy'] strong {
 }
 
 body[data-admin-color-mode='dark'] .admin-view-stage p,
+body[data-admin-color-mode='dark'] .admin-view-stage span,
 body[data-admin-color-mode='dark'] .admin-view-stage small,
 body[data-admin-color-mode='dark'] .admin-view-stage li,
 body[data-admin-color-mode='dark'] .admin-view-stage dt,
@@ -3759,6 +3841,20 @@ body[data-admin-color-mode='dark'] [class*='-modal__copy'],
 body[data-admin-color-mode='dark'] [class*='-modal__warning'],
 body[data-admin-color-mode='dark'] [class*='-modal__error'] {
   color: var(--admin-text-secondary) !important;
+}
+
+body[data-admin-color-mode='dark'] .admin-view-stage i,
+body[data-admin-color-mode='dark'] .admin-view-stage .bi,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-icon'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__icon'] {
+  color: var(--admin-icon-color) !important;
+}
+
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-name'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__name'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-email'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__email'] {
+  color: var(--admin-text-primary) !important;
 }
 
 body[data-admin-color-mode='dark'] .admin-view-stage input:not([type='checkbox']):not([type='radio']):not([type='file']),
@@ -3800,6 +3896,17 @@ body[data-admin-color-mode='dark'] .admin-view-stage [class*='switch-indicator']
 
 body[data-admin-color-mode='dark'] .admin-view-stage thead th {
   background: var(--admin-bg-surface-muted) !important;
+  background-image: none !important;
+  color: var(--admin-text-secondary) !important;
+  border-color: var(--admin-border-color) !important;
+}
+
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-head'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__head'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-header'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__header'] {
+  background: var(--admin-bg-surface-muted) !important;
+  background-image: none !important;
   color: var(--admin-text-secondary) !important;
   border-color: var(--admin-border-color) !important;
 }
@@ -3811,6 +3918,7 @@ body[data-admin-color-mode='dark'] .admin-view-stage [class*='__row'],
 body[data-admin-color-mode='dark'] .admin-view-stage [class*='-item'],
 body[data-admin-color-mode='dark'] .admin-view-stage [class*='__item'] {
   background: transparent !important;
+  background-image: none !important;
   border-color: var(--admin-border-color) !important;
 }
 
@@ -3819,7 +3927,84 @@ body[data-admin-color-mode='dark'] .admin-view-stage [class*='-row']:hover,
 body[data-admin-color-mode='dark'] .admin-view-stage [class*='__row']:hover,
 body[data-admin-color-mode='dark'] .admin-view-stage [class*='-item']:hover,
 body[data-admin-color-mode='dark'] .admin-view-stage [class*='__item']:hover {
-  background: var(--admin-bg-hover) !important;
+  background: var(--admin-bg-hover-strong) !important;
+  background-image: none !important;
+}
+
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-button']:hover,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__button']:hover,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='ghost-btn']:hover,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='filter-btn']:hover,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='action-btn']:hover,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__trigger']:hover,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__option']:hover,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-filter']:hover,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-search']:hover,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__search']:hover,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-summary']:hover,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__summary']:hover {
+  background: var(--admin-bg-hover-strong) !important;
+  background-image: none !important;
+  color: var(--admin-text-primary) !important;
+  border-color: var(--admin-border-color) !important;
+}
+
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-row']:hover [class*='-account'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-row']:hover [class*='__account'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-row']:hover [class*='-meta'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-row']:hover [class*='__meta'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-row']:hover [class*='-details'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-row']:hover [class*='__details'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-item']:hover [class*='-account'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-item']:hover [class*='__account'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-item']:hover [class*='-meta'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-item']:hover [class*='__meta'] {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-account'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__account'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-meta'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__meta'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-identity'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__identity'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-details'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__details'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-email'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__email'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-role'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__role'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-date'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__date'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-id'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__id'] {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-meta'] span,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__meta'] span,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-subtitle'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__subtitle'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-subcopy'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__subcopy'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-detail'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__detail'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-id'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__id'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-role'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__role'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-date'],
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__date'] {
+  color: var(--admin-text-secondary) !important;
+}
+
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-meta'] strong,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__meta'] strong,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='-account'] strong,
+body[data-admin-color-mode='dark'] .admin-view-stage [class*='__account'] strong {
+  color: var(--admin-text-primary) !important;
 }
 
 body[data-admin-color-mode='dark'] .admin-view-stage [class*='ghost-btn'],
@@ -4031,23 +4216,27 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
   }
 }
 
-.admin-view-enter-active,
-.admin-view-leave-active {
+.admin-content-fade-enter-active,
+.admin-content-fade-leave-active {
   transition:
-    opacity 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+    opacity 0.24s ease,
+    transform 0.24s ease;
 }
 
-.admin-view-enter-from,
-.admin-view-leave-to {
+.admin-content-fade-enter-from {
   opacity: 0;
-  transform: translateY(18px) scale(0.985);
+  transform: translate3d(0, 10px, 0);
 }
 
-.admin-view-enter-to,
-.admin-view-leave-from {
+.admin-content-fade-leave-to {
+  opacity: 0;
+  transform: none;
+}
+
+.admin-content-fade-enter-to,
+.admin-content-fade-leave-from {
   opacity: 1;
-  transform: translateY(0) scale(1);
+  transform: none;
 }
 
 .admin-content {
@@ -4619,6 +4808,14 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-sheet']),
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__sheet']),
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-toolbar']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-header']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__header']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-head']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__head']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-list']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__list']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-table']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__table']),
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-search']),
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-summary']),
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-empty']),
@@ -4638,6 +4835,7 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-zone']),
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-shell']) {
   background: var(--admin-bg-surface) !important;
+  background-image: none !important;
   color: var(--admin-text-primary) !important;
   border-color: var(--admin-border-color) !important;
   box-shadow: var(--admin-shadow-soft) !important;
@@ -4663,6 +4861,7 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
 }
 
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep(p),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep(span),
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep(small),
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep(li),
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep(dt),
@@ -4688,6 +4887,20 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-empty']),
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__identity']) {
   color: var(--admin-text-secondary) !important;
+}
+
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep(i),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep(.bi),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-icon']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__icon']) {
+  color: var(--admin-icon-color) !important;
+}
+
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-name']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__name']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-email']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__email']) {
+  color: var(--admin-text-primary) !important;
 }
 
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep(input:not([type='checkbox']):not([type='radio']):not([type='file'])),
@@ -4724,6 +4937,17 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
 
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep(thead th) {
   background: var(--admin-bg-surface-muted) !important;
+  background-image: none !important;
+  color: var(--admin-text-secondary) !important;
+  border-color: var(--admin-border-color) !important;
+}
+
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-head']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__head']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-header']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__header']) {
+  background: var(--admin-bg-surface-muted) !important;
+  background-image: none !important;
   color: var(--admin-text-secondary) !important;
   border-color: var(--admin-border-color) !important;
 }
@@ -4734,6 +4958,7 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-item']),
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__item']) {
   background: transparent !important;
+  background-image: none !important;
   border-color: var(--admin-border-color) !important;
 }
 
@@ -4742,7 +4967,84 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__row']:hover),
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-item']:hover),
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__item']:hover) {
-  background: var(--admin-bg-hover) !important;
+  background: var(--admin-bg-hover-strong) !important;
+  background-image: none !important;
+}
+
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-button']:hover),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__button']:hover),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='ghost-btn']:hover),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='filter-btn']:hover),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='action-btn']:hover),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__trigger']:hover),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__option']:hover),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-filter']:hover),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-search']:hover),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__search']:hover),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-summary']:hover),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__summary']:hover) {
+  background: var(--admin-bg-hover-strong) !important;
+  background-image: none !important;
+  color: var(--admin-text-primary) !important;
+  border-color: var(--admin-border-color) !important;
+}
+
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-row']:hover [class*='-account']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-row']:hover [class*='__account']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-row']:hover [class*='-meta']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-row']:hover [class*='__meta']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-row']:hover [class*='-details']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-row']:hover [class*='__details']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-item']:hover [class*='-account']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-item']:hover [class*='__account']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-item']:hover [class*='-meta']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-item']:hover [class*='__meta']) {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-account']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__account']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-meta']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__meta']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-identity']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__identity']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-details']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__details']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-email']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__email']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-role']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__role']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-date']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__date']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-id']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__id']) {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-meta'] span),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__meta'] span),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-subtitle']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__subtitle']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-subcopy']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__subcopy']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-detail']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__detail']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-id']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__id']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-role']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__role']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-date']),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__date']) {
+  color: var(--admin-text-secondary) !important;
+}
+
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-meta'] strong),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__meta'] strong),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='-account'] strong),
+.admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='__account'] strong) {
+  color: var(--admin-text-primary) !important;
 }
 
 .admin-shell[data-color-mode='dark'] .admin-view-stage :deep([class*='ghost-btn']),
@@ -4758,6 +5060,52 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
   background: var(--admin-bg-surface-muted) !important;
   color: var(--admin-text-primary) !important;
   border-color: var(--admin-border-color) !important;
+}
+
+.admin-shell[data-color-mode='dark'] .dashboard-line-chart,
+.admin-shell[data-color-mode='dark'] .dashboard-line-chart__growth-card,
+.admin-shell[data-color-mode='dark'] .dashboard-donut__ring::after {
+  background: var(--admin-bg-surface) !important;
+  background-image: none !important;
+  border-color: var(--admin-border-color) !important;
+}
+
+.admin-shell[data-color-mode='dark'] .dashboard-line-chart {
+  background:
+    radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 28%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(10, 15, 27, 0.94) 100%) !important;
+}
+
+.admin-shell[data-color-mode='dark'] .dashboard-line-chart__grid {
+  background-image:
+    linear-gradient(rgba(148, 163, 184, 0.16) 1px, transparent 1px) !important;
+}
+
+.admin-shell[data-color-mode='dark'] .dashboard-line-chart__svg {
+  filter: drop-shadow(0 12px 24px rgba(2, 6, 23, 0.34)) !important;
+}
+
+.admin-shell[data-color-mode='dark'] .dashboard-line-chart__area-path {
+  fill: rgba(59, 130, 246, 0.12) !important;
+}
+
+.admin-shell[data-color-mode='dark'] .dashboard-line-chart__point {
+  stroke: #0f172a !important;
+}
+
+.admin-shell[data-color-mode='dark'] .dashboard-line-chart__summary span,
+.admin-shell[data-color-mode='dark'] .dashboard-line-chart__labels,
+.admin-shell[data-color-mode='dark'] .dashboard-donut__center span,
+.admin-shell[data-color-mode='dark'] .dashboard-donut__legend-item {
+  color: var(--admin-text-secondary) !important;
+}
+
+.admin-shell[data-color-mode='dark'] .dashboard-donut__center strong {
+  color: var(--admin-text-primary) !important;
+}
+
+.admin-shell[data-color-mode='dark'] .dashboard-donut__ring {
+  box-shadow: 0 16px 30px rgba(2, 6, 23, 0.32) !important;
 }
 
 .admin-settings-modal-enter-active,
@@ -4783,6 +5131,26 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
   transform: translateY(12px) scale(0.98);
 }
 
+@keyframes admin-dashboard-card-enter {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.dashboard-motion-card {
+  opacity: 0;
+  transform: translate3d(0, 12px, 0);
+  animation: admin-dashboard-card-enter 500ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: var(--dashboard-enter-delay, 0ms);
+  will-change: transform, opacity;
+}
+
 .dashboard-panel,
 .dashboard-summary-card {
   border: 1px solid rgba(112, 168, 136, 0.16);
@@ -4793,15 +5161,6 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
     0 16px 36px rgba(79, 129, 102, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(10px);
-}
-
-.dashboard-summary-card--enter,
-.dashboard-panel--enter {
-  opacity: 0;
-  transform: translateY(22px);
-  animation: dashboard-fade-up var(--admin-motion-duration-xl) cubic-bezier(0.22, 1, 0.36, 1) forwards;
-  animation-delay: var(--dashboard-enter-delay, 0ms);
-  will-change: transform, opacity;
 }
 
 .dashboard-eyebrow,
@@ -5273,8 +5632,8 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
   padding-right: 1.15rem;
 }
 
-.admin-shell[data-reduce-motion='true'] .admin-view-enter-active,
-.admin-shell[data-reduce-motion='true'] .admin-view-leave-active,
+.admin-shell[data-reduce-motion='true'] .admin-content-fade-enter-active,
+.admin-shell[data-reduce-motion='true'] .admin-content-fade-leave-active,
 .admin-shell[data-reduce-motion='true'] .admin-toast-enter-active,
 .admin-shell[data-reduce-motion='true'] .admin-toast-leave-active,
 .admin-shell[data-reduce-motion='true'] .admin-settings-modal-enter-active,
@@ -5285,7 +5644,6 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
 .admin-shell[data-reduce-motion='true'] .dashboard-donut-status-leave-active,
 .admin-shell[data-reduce-motion='true'] .dashboard-donut-status-enter-active .dashboard-donut__ring,
 .admin-shell[data-reduce-motion='true'] .dashboard-donut-status-leave-active .dashboard-donut__ring,
-.admin-shell[data-reduce-motion='true'] .dashboard-summary-card,
 .admin-shell[data-reduce-motion='true'] .admin-toast__action,
 .admin-shell[data-reduce-motion='true'] .admin-toast__close,
 .admin-shell[data-reduce-motion='true'] .admin-icon-button,
@@ -5295,20 +5653,21 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
   transition-duration: 0.01ms !important;
 }
 
-.admin-shell[data-reduce-motion='true'] .admin-view-enter-from,
-.admin-shell[data-reduce-motion='true'] .admin-view-leave-to,
+.admin-shell[data-reduce-motion='true'] .admin-content-fade-enter-from,
+.admin-shell[data-reduce-motion='true'] .admin-content-fade-leave-to,
 .admin-shell[data-reduce-motion='true'] .admin-toast-enter-from,
 .admin-shell[data-reduce-motion='true'] .admin-toast-leave-to,
 .admin-shell[data-reduce-motion='true'] .admin-settings-modal-enter-from .admin-settings-modal__card,
 .admin-shell[data-reduce-motion='true'] .admin-settings-modal-leave-to .admin-settings-modal__card,
 .admin-shell[data-reduce-motion='true'] .dashboard-donut-status-enter-from,
 .admin-shell[data-reduce-motion='true'] .dashboard-donut-status-leave-to,
-.admin-shell[data-reduce-motion='true'] .dashboard-summary-card--enter,
-.admin-shell[data-reduce-motion='true'] .dashboard-panel--enter,
+.admin-shell[data-reduce-motion='true'] .dashboard-motion-card,
 .admin-shell[data-reduce-motion='true'] .dashboard-summary-card:hover,
 .admin-shell[data-reduce-motion='true'] .admin-toast__action:hover,
 .admin-shell[data-reduce-motion='true'] .admin-toast__close:hover,
 .admin-shell[data-reduce-motion='true'] .admin-icon-button:hover {
+  animation: none !important;
+  opacity: 1 !important;
   transform: none !important;
   filter: none !important;
 }
@@ -5574,10 +5933,13 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
 }
 
 .dashboard-approved-table-shell {
-  overflow: hidden;
+  overflow: auto;
+  max-height: min(68vh, 56rem);
   border: 1px solid rgba(223, 227, 234, 0.96);
   border-radius: 1rem;
   background: #ffffff;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
 }
 
 .dashboard-approved-table {
@@ -5594,6 +5956,9 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
 }
 
 .dashboard-approved-table__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   border-bottom: 1px solid rgba(223, 227, 234, 0.96);
   background: #fcfcfd;
   color: #5f6b7d;
@@ -6096,6 +6461,33 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
   color: #94a3b8;
 }
 
+.admin-initial-loader {
+  min-height: min(24rem, 52vh);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  padding: 1.6rem;
+}
+
+.admin-view-stage :deep(.admin-async-loader) {
+  min-height: min(24rem, 52vh);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.5rem;
+  padding: 1.6rem;
+  text-align: center;
+}
+
+.admin-view-stage :deep(.admin-async-loader__dots) {
+  color: #2f6a49;
+}
+
+.admin-view-stage :deep(.admin-async-loader__label) {
+  color: #5d7668;
+  font-size: 0.92rem;
+}
+
 @media (max-width: 900px) {
   .admin-logs-item {
     grid-template-columns: 1fr;
@@ -6108,18 +6500,6 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
   .admin-logs-item__time {
     justify-items: start;
     white-space: normal;
-  }
-}
-
-@keyframes dashboard-fade-up {
-  0% {
-    opacity: 0;
-    transform: translateY(22px) scale(0.985);
-  }
-
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
   }
 }
 
@@ -6205,7 +6585,8 @@ body[data-admin-color-mode='dark'] [class*='-modal__danger-icon'] {
   }
 
   .dashboard-approved-table-shell {
-    overflow-x: auto;
+    overflow: auto;
+    max-height: min(62vh, 48rem);
   }
 
   .dashboard-approved-table {

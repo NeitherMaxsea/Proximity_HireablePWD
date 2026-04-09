@@ -2,9 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import heroBackdrop from '@/assets/better02.jpg'
-import logoPwd from '@/assets/logo-pwd.png'
 import mathLogo from '@/assets/math.png'
-import pwdWordmark from '@/assets/pwdlogo.png'
 import { getEmployerDashboardRoute, signInAccount } from '@/lib/auth'
 
 const router = useRouter()
@@ -21,7 +19,6 @@ const isRouteLoading = ref(false)
 const isSubmitting = ref(false)
 const toast = ref(null)
 const showForgotPassword = ref(false)
-let routeTimerId
 let toastTimerId
 
 const REMEMBERED_LOGIN_EMAIL_KEY = 'rememberedLoginEmail'
@@ -82,11 +79,13 @@ const loginNotice = computed(() => {
 
 const navigateToSelectRole = () => {
   if (isRouteLoading.value) return
-  isRouteLoading.value = true
-  window.clearTimeout(routeTimerId)
-  routeTimerId = window.setTimeout(() => {
-    router.push('/select-role')
-  }, 180)
+  ;(async () => {
+    try {
+      await router.push('/select-role')
+    } catch {
+      notify('Unable to open the registration page right now. Please try again.', 'error', 'Navigation failed')
+    }
+  })()
 }
 
 const getToastTitle = (text, kind = 'error') => {
@@ -240,16 +239,20 @@ const submitLogin = async () => {
       sessionStorage.setItem(APPLICANT_ENTRY_TRANSITION_KEY, '1')
       sessionStorage.setItem(APPLICANT_WELCOME_TOAST_KEY, applicantFirstName)
       isRouteLoading.value = true
-      window.clearTimeout(routeTimerId)
-      routeTimerId = window.setTimeout(() => {
-        router.push('/applicant')
-      }, 220)
+      const navigationResult = await router.push('/applicant')
+      if (navigationResult) {
+        isRouteLoading.value = false
+      }
       return
     }
 
     if (['admin', 'system_admin'].includes(String(data.user?.role || '').trim().toLowerCase())) {
       notify('Login successful. Opening admin panel...', 'success')
-      router.push('/admin')
+      isRouteLoading.value = true
+      const navigationResult = await router.push('/admin')
+      if (navigationResult) {
+        isRouteLoading.value = false
+      }
       return
     }
 
@@ -261,7 +264,7 @@ const submitLogin = async () => {
       }
       notify('Login successful. Redirecting...', 'success')
       isRouteLoading.value = true
-      await router.replace(
+      const navigationResult = await router.replace(
         employerDashboardRoute === '/employer/business'
           ? {
               path: employerDashboardRoute,
@@ -271,12 +274,23 @@ const submitLogin = async () => {
             }
           : employerDashboardRoute || '/login',
       )
+      if (navigationResult) {
+        isRouteLoading.value = false
+      }
       return
     }
 
     notify('Login successful. Redirecting...', 'success')
-    router.push('/')
+    isRouteLoading.value = true
+    const navigationResult = await router.push('/')
+    if (navigationResult) {
+      isRouteLoading.value = false
+    }
   } catch (error) {
+    if (isRouteLoading.value) {
+      isRouteLoading.value = false
+    }
+
     const message = error instanceof Error ? error.message : 'Unable to sign in right now. Please try again.'
     const { message: resolvedMessage } = setFieldErrorsFromMessage(message)
     notify(
@@ -311,7 +325,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  window.clearTimeout(routeTimerId)
   window.clearTimeout(toastTimerId)
 })
 
@@ -430,10 +443,10 @@ watch(rememberMe, (value) => {
               <a v-if="showForgotPassword" href="#home">Forgot password?</a>
             </div>
 
-            <button type="submit" class="login-form__submit" :disabled="isSubmitting">
+            <button type="submit" class="login-form__submit" :disabled="isSubmitting" :aria-busy="isSubmitting ? 'true' : 'false'">
               <span class="login-form__submit-content">
                 <span v-if="isSubmitting" class="login-form__submit-spinner" aria-hidden="true" />
-                <span>{{ isSubmitting ? 'Signing in...' : 'Login' }}</span>
+                <span>{{ isSubmitting ? 'Signing In...' : 'Sign In' }}</span>
               </span>
             </button>
           </form>

@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+﻿import { computed, ref } from 'vue'
 
 export const createRecruitmentState = (ctx = {}) => {
   const {
@@ -32,26 +32,6 @@ export const createRecruitmentState = (ctx = {}) => {
 
   const resolveJobPostingBusinessCategory = (fallback = '') =>
     String(profileForm.value.category || businessCategory.value || fallback || '').trim()
-  const JOB_POSTING_DISABILITY_TYPE_LOOKUP = new Map(
-    JOB_POSTING_DISABILITY_TYPES.map((entry) => [
-      String(entry?.value || '').trim(),
-      String(entry?.label || entry?.value || '').trim(),
-    ]),
-  )
-  const normalizeJobPostingDisabilityTypes = (value) => {
-    const sourceValues = Array.isArray(value) ? value : [value]
-
-    return [...new Set(
-      sourceValues
-        .flatMap((entry) => String(entry || '').split(/[\r\n,]+/))
-        .map((entry) => entry.trim())
-        .filter(Boolean),
-    )]
-  }
-  const serializeJobPostingDisabilityTypes = (value) =>
-    normalizeJobPostingDisabilityTypes(value).join(', ')
-  const resolveJobPostingDisabilityTypeLabel = (value) =>
-    JOB_POSTING_DISABILITY_TYPE_LOOKUP.get(String(value || '').trim()) || String(value || '').trim()
 
   const createJobPostingDraft = () => ({
     title: '',
@@ -123,13 +103,8 @@ export const createRecruitmentState = (ctx = {}) => {
       .filter(Boolean)
   const jobPostingQualificationsPreview = computed(() => toJobPostingLineItems(jobPostingDraft.value.qualifications))
   const jobPostingResponsibilitiesPreview = computed(() => toJobPostingLineItems(jobPostingDraft.value.responsibilities))
-  const jobPostingSelectedDisabilityTypes = computed(() =>
-    normalizeJobPostingDisabilityTypes(jobPostingDraft.value.disabilityType),
-  )
   const jobPostingDisabilityTypeNeedsSpecification = computed(() =>
-    jobPostingSelectedDisabilityTypes.value.some((entry) =>
-      JOB_POSTING_DISABILITY_TYPES_REQUIRING_SPECIFICATION.has(String(entry || '').trim()),
-    ),
+    JOB_POSTING_DISABILITY_TYPES_REQUIRING_SPECIFICATION.has(String(jobPostingDraft.value.disabilityType || '').trim()),
   )
   const jobPostingTypeLabel = computed(() =>
     String(jobPostingDraft.value.type || '').trim() || 'Select job type',
@@ -137,15 +112,9 @@ export const createRecruitmentState = (ctx = {}) => {
   const jobPostingBarangayLabel = computed(() =>
     JOB_POSTING_BARANGAYS.find((entry) => entry.value === jobPostingDraft.value.barangay)?.label || 'Select barangay',
   )
-  const jobPostingDisabilityLabel = computed(() => {
-    const selectedLabels = jobPostingSelectedDisabilityTypes.value
-      .map((entry) => resolveJobPostingDisabilityTypeLabel(entry))
-      .filter(Boolean)
-
-    if (!selectedLabels.length) return 'Select disability types'
-    if (selectedLabels.length <= 2) return selectedLabels.join(', ')
-    return `${selectedLabels.slice(0, 2).join(', ')} +${selectedLabels.length - 2} more`
-  })
+  const jobPostingDisabilityLabel = computed(() =>
+    JOB_POSTING_DISABILITY_TYPES.find((entry) => entry.value === jobPostingDraft.value.disabilityType)?.label || 'Select disability type',
+  )
   const jobPostingLanguageLabel = computed(() =>
     JOB_POSTING_LANGUAGE_OPTIONS.find((entry) => entry.value === jobPostingDraft.value.language)?.label || 'Select language',
   )
@@ -153,10 +122,6 @@ export const createRecruitmentState = (ctx = {}) => {
     const digits = String(value || '').replace(/[^\d]/g, '')
     return digits ? Number(digits) : 0
   }
-  const normalizePreferredAgeRangeInput = (value) =>
-    String(value || '')
-      .replace(/[^\d]/g, '')
-      .slice(0, 3)
   const parseJobPostingSalaryRange = (value) => {
     const raw = String(value || '').trim()
     if (!raw) {
@@ -242,7 +207,7 @@ export const createRecruitmentState = (ctx = {}) => {
     vacancies: Math.max(1, Number(record.vacancies || 1) || 1),
     salary: String(record.salary || record.salaryRange || 'Negotiable').trim(),
     salaryRange: String(record.salaryRange || record.salary || 'Negotiable').trim(),
-    disabilityType: serializeJobPostingDisabilityTypes(record.disabilityType || record.disabilityTypes),
+    disabilityType: String(record.disabilityType || '').trim(),
     impairmentSpecification: String(record.impairmentSpecification || '').trim(),
     preferredAgeRange: String(record.preferredAgeRange || '').trim(),
     language: String(record.language || '').trim(),
@@ -255,19 +220,6 @@ export const createRecruitmentState = (ctx = {}) => {
     posted: formatPostedJobDateLabel(record.createdAt || record.created_at || record.updatedAt || record.updated_at, 'Posted'),
     workspaceOwnerId: String(record.workspaceOwnerId || record.workspace_owner_id || '').trim(),
   })
-  const syncPostedJobRecordLocally = (record = {}) => {
-    const nextRecord = createPostedJobRecord(record)
-    if (!nextRecord.id) return
-
-    postedJobs.value = [
-      nextRecord,
-      ...postedJobs.value.filter((job) => String(job?.id || '').trim() !== nextRecord.id),
-    ].sort((left, right) => {
-      const leftTime = Date.parse(String(left?.updatedAt || left?.createdAt || '')) || 0
-      const rightTime = Date.parse(String(right?.updatedAt || right?.createdAt || '')) || 0
-      return rightTime - leftTime
-    })
-  }
   const postedJobsSummary = computed(() => {
     const openCount = postedJobs.value.filter((job) => String(job.status || '').trim().toLowerCase() === 'open').length
     const draftCount = postedJobs.value.filter((job) => String(job.status || '').trim().toLowerCase() === 'draft').length
@@ -332,7 +284,7 @@ export const createRecruitmentState = (ctx = {}) => {
     barangay: String(job.barangay || '').trim(),
     vacancies: String(job.vacancies || ''),
     salaryRange: String(job.salaryRange || job.salary || '').trim(),
-    disabilityType: serializeJobPostingDisabilityTypes(job.disabilityType || job.disabilityTypes),
+    disabilityType: String(job.disabilityType || '').trim(),
     impairmentSpecification: String(job.impairmentSpecification || '').trim(),
     preferredAgeRange: String(job.preferredAgeRange || '').trim(),
     language: String(job.language || '').trim(),
@@ -375,21 +327,13 @@ export const createRecruitmentState = (ctx = {}) => {
     jobPostingTab.value = 'posted'
   }
   const buildJobPostingDisabilityFitLabel = (disabilityType, impairmentSpecification) => {
-    const category = normalizeJobPostingDisabilityTypes(disabilityType)
-      .map((entry) => resolveJobPostingDisabilityTypeLabel(entry))
-      .join(', ')
+    const category = String(disabilityType || '').trim()
     const specification = String(impairmentSpecification || '').trim()
     if (category && specification) return `${category} - ${specification}`
     return category || specification
   }
   const getJobPostingImpairmentSpecificationPlaceholder = (disabilityType) => {
-    const normalizedDisabilityTypes = normalizeJobPostingDisabilityTypes(disabilityType)
-
-    if (normalizedDisabilityTypes.length > 1) {
-      return 'Example: Limited hand mobility, low vision, hard of hearing'
-    }
-
-    switch (normalizedDisabilityTypes[0] || '') {
+    switch (String(disabilityType || '').trim()) {
       case 'Physical Impairment':
         return 'Example: Right leg, left arm, limited hand mobility'
       case 'Visual Impairment':
@@ -425,15 +369,12 @@ export const createRecruitmentState = (ctx = {}) => {
   }
   const handleJobPostingFieldChange = (key, value) => {
     if (key === 'disabilityType') {
-      const normalizedDisabilityType = serializeJobPostingDisabilityTypes(value)
-      const shouldKeepSpecification = normalizeJobPostingDisabilityTypes(normalizedDisabilityType).some((entry) =>
-        JOB_POSTING_DISABILITY_TYPES_REQUIRING_SPECIFICATION.has(String(entry || '').trim()),
-      )
-
       jobPostingDraft.value = {
         ...jobPostingDraft.value,
-        disabilityType: normalizedDisabilityType,
-        impairmentSpecification: shouldKeepSpecification ? jobPostingDraft.value.impairmentSpecification : '',
+        disabilityType: value,
+        impairmentSpecification: JOB_POSTING_DISABILITY_TYPES_REQUIRING_SPECIFICATION.has(String(value || '').trim())
+          ? jobPostingDraft.value.impairmentSpecification
+          : '',
       }
       return
     }
@@ -442,14 +383,6 @@ export const createRecruitmentState = (ctx = {}) => {
       jobPostingDraft.value = {
         ...jobPostingDraft.value,
         salaryRange: formatJobPostingSalaryRangeInput(value),
-      }
-      return
-    }
-
-    if (key === 'preferredAgeRange') {
-      jobPostingDraft.value = {
-        ...jobPostingDraft.value,
-        preferredAgeRange: normalizePreferredAgeRangeInput(value),
       }
       return
     }
@@ -541,7 +474,15 @@ export const createRecruitmentState = (ctx = {}) => {
           const normalizedJobTitle = String(selectedJob.title || 'this job post').trim() || 'this job post'
           const applicationDiscontinuationReason = `The job post "${normalizedJobTitle}" was deleted by the business. This application was discontinued.`
           const buildInterviewCancellationReason = (application = {}, schedule = {}) => {
-            return `The job post "${normalizedJobTitle}" was deleted by the business. The interview was cancelled and the application was discontinued.`
+            const interviewType = String(
+              schedule?.interviewType
+                || schedule?.interview_type
+                || application?.interviewType
+                || application?.interview_type
+                || 'initial',
+            ).trim().toLowerCase() || 'initial'
+            const interviewLabel = interviewType === 'final' ? 'final interview' : 'initial interview'
+            return `The job post "${normalizedJobTitle}" was deleted by the business. The ${interviewLabel} was cancelled and the application was discontinued.`
           }
           const assessmentDiscontinuationReason = `The job post "${normalizedJobTitle}" was deleted by the business. This technical assessment was discontinued because the application was discontinued.`
           const affectedApplications = businessJobApplications.value.filter((application) =>
@@ -637,10 +578,10 @@ export const createRecruitmentState = (ctx = {}) => {
   const saveJobPost = async () => {
     if (!canEditBusinessModule('job-posting')) {
       showPaymentToast('Your role has view-only access for Job Posting.', 'warning')
-      return false
+      return
     }
 
-    if (isSavingJobPost.value) return false
+    if (isSavingJobPost.value) return
 
     const requiredFields = [
       ['job title', jobPostingDraft.value.title],
@@ -657,7 +598,11 @@ export const createRecruitmentState = (ctx = {}) => {
       ['language', jobPostingDraft.value.language],
       ['qualifications', jobPostingDraft.value.qualifications],
       ['responsibilities', jobPostingDraft.value.responsibilities],
-    ]
+    ].concat(
+      jobPostingDisabilityTypeNeedsSpecification.value
+        ? [['impairment specification', jobPostingDraft.value.impairmentSpecification]]
+        : [],
+    )
 
     const missingFields = requiredFields
       .filter(([, value]) => String(value ?? '').trim() === '')
@@ -665,24 +610,18 @@ export const createRecruitmentState = (ctx = {}) => {
 
     if (missingFields.length) {
       showPaymentToast(`Please complete your ${missingFields.join(', ')}.`, 'warning')
-      return false
+      return
     }
 
     const vacancyCount = Number(jobPostingDraft.value.vacancies)
     if (!Number.isFinite(vacancyCount) || vacancyCount < 1 || vacancyCount > JOB_POSTING_MAX_VACANCIES) {
       showPaymentToast(`Vacancies must be between 1 and ${JOB_POSTING_MAX_VACANCIES}.`, 'warning')
-      return false
+      return
     }
 
     if (!parseJobPostingSalaryRange(jobPostingDraft.value.salaryRange).isValid) {
       showPaymentToast('Enter the salary as minimum - maximum, for example PHP 15,000 - PHP 20,000.', 'warning')
-      return false
-    }
-
-    const preferredAge = Number(jobPostingDraft.value.preferredAgeRange)
-    if (!Number.isFinite(preferredAge) || preferredAge < 18) {
-      showPaymentToast('Preferred age must be 18 or above.', 'warning')
-      return false
+      return
     }
 
     const workspaceOwnerId = getWorkspaceOwnerDirectoryId()
@@ -693,11 +632,11 @@ export const createRecruitmentState = (ctx = {}) => {
       || authUser.value?.email
       || '',
     ).trim().toLowerCase()
-    const employerId = String(authUser.value?.id || authUser.value?.uid || workspaceOwnerId || '').trim()
+    const employerId = String(authUser.value?.id || '').trim()
 
     if (!workspaceOwnerId || !employerId) {
       showPaymentToast('Refresh the page and sign in again before saving this job post.', 'error')
-      return false
+      return
     }
 
     try {
@@ -717,9 +656,9 @@ export const createRecruitmentState = (ctx = {}) => {
         vacancies: vacancyCount,
         salary: jobPostingSalaryPreview.value,
         salaryRange: jobPostingDraft.value.salaryRange,
-        disabilityType: serializeJobPostingDisabilityTypes(jobPostingDraft.value.disabilityType),
+        disabilityType: jobPostingDraft.value.disabilityType,
         impairmentSpecification: jobPostingDraft.value.impairmentSpecification,
-        preferredAgeRange: String(preferredAge),
+        preferredAgeRange: jobPostingDraft.value.preferredAgeRange,
         language: jobPostingDraft.value.language,
         languages: jobPostingDraft.value.language,
         qualifications: toJobPostingLineItems(jobPostingDraft.value.qualifications),
@@ -731,12 +670,10 @@ export const createRecruitmentState = (ctx = {}) => {
         createdBy: employerId,
       }
 
-      const savedJob = wasEditingJobPost
-        ? await updateBusinessJobPost(editingJobPostId.value, payload)
-        : await createBusinessJobPost(payload)
-
-      if (savedJob) {
-        syncPostedJobRecordLocally(savedJob)
+      if (wasEditingJobPost) {
+        await updateBusinessJobPost(editingJobPostId.value, payload)
+      } else {
+        await createBusinessJobPost(payload)
       }
 
       resetJobPostingDraft()
@@ -747,7 +684,6 @@ export const createRecruitmentState = (ctx = {}) => {
           : 'Job post published. It now appears in Posted Jobs and the public landing page.',
         'success',
       )
-      return true
     } catch (error) {
       showPaymentToast(
         error instanceof Error
@@ -757,7 +693,6 @@ export const createRecruitmentState = (ctx = {}) => {
             : 'Unable to publish the job post right now.',
         'error',
       )
-      return false
     } finally {
       isSavingJobPost.value = false
     }
@@ -811,9 +746,6 @@ export const createRecruitmentState = (ctx = {}) => {
       },
     )
   }
-  const setJobPostingDisabilityTypes = (values = []) => {
-    handleJobPostingFieldChange('disabilityType', values)
-  }
 
   return {
     jobPostingTab,
@@ -831,7 +763,6 @@ export const createRecruitmentState = (ctx = {}) => {
     jobPostingCreatedPreview,
     jobPostingQualificationsPreview,
     jobPostingResponsibilitiesPreview,
-    jobPostingSelectedDisabilityTypes,
     jobPostingDisabilityTypeNeedsSpecification,
     jobPostingTypeLabel,
     jobPostingBarangayLabel,
@@ -866,7 +797,6 @@ export const createRecruitmentState = (ctx = {}) => {
     isJobPostActionPending,
     permanentlyDeleteJobPost,
     buildJobPostingDisabilityFitLabel,
-    setJobPostingDisabilityTypes,
   }
 }
 
@@ -891,9 +821,7 @@ export const createRecruitmentBindings = (ctx) => computed(() => ({
   JOB_POSTING_MAX_VACANCIES: ctx.JOB_POSTING_MAX_VACANCIES,
   JOB_POSTING_DISABILITY_TYPES: ctx.JOB_POSTING_DISABILITY_TYPES,
   jobPostingDisabilityLabel: ctx.jobPostingDisabilityLabel.value,
-  jobPostingSelectedDisabilityTypes: ctx.jobPostingSelectedDisabilityTypes.value,
   jobPostingDisabilityTypeNeedsSpecification: ctx.jobPostingDisabilityTypeNeedsSpecification.value,
-  setJobPostingDisabilityTypes: ctx.setJobPostingDisabilityTypes,
   getJobPostingImpairmentSpecificationPlaceholder: ctx.getJobPostingImpairmentSpecificationPlaceholder,
   JOB_POSTING_LANGUAGE_OPTIONS: ctx.JOB_POSTING_LANGUAGE_OPTIONS,
   jobPostingLanguageLabel: ctx.jobPostingLanguageLabel.value,

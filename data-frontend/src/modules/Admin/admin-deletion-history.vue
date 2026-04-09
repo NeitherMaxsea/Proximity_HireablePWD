@@ -571,10 +571,13 @@ const handleBulkHistoryDelete = async () => {
 }
 
 .deleted-history-table-shell {
-  overflow: hidden;
+  overflow: auto;
+  max-height: min(68vh, 56rem);
   border: 1px solid rgba(122, 179, 145, 0.14);
   border-radius: 0.8rem;
   background: #fff;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(117, 148, 130, 0.45) transparent;
 }
 
 .deleted-history-table {
@@ -583,6 +586,9 @@ const handleBulkHistoryDelete = async () => {
 }
 
 .deleted-history-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   padding: 0.82rem 0.9rem;
   text-align: left;
   color: #6d8576;
@@ -929,7 +935,8 @@ const handleBulkHistoryDelete = async () => {
   }
 
   .deleted-history-table-shell {
-    overflow-x: auto;
+    overflow: auto;
+    max-height: min(62vh, 48rem);
   }
 
   .deleted-history-table {

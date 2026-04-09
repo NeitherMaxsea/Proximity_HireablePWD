@@ -27,7 +27,7 @@ import {
   writeBatch,
 } from 'firebase/firestore'
 import { deleteObject, getDownloadURL, getStorage, ref as storageRef, uploadBytes } from 'firebase/storage'
-import { app, auth, cloudFunctions, db, storage } from '@/firebase'
+import { app, auth, cloudFunctions, CLOUD_FUNCTIONS_REGION, db, FIREBASE_PROJECT_ID, storage } from '@/firebase'
 
 const USERS_COLLECTION = 'users'
 const EMPLOYERS_COLLECTION = 'employers'
@@ -67,6 +67,8 @@ const timestampText = (value) => {
   return text(value)
 }
 const nowIso = () => new Date().toISOString()
+const buildHttpFunctionUrl = (functionName) =>
+  `https://${CLOUD_FUNCTIONS_REGION}-${FIREBASE_PROJECT_ID}.cloudfunctions.net/${functionName}`
 const daysFromNowIso = (days) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
 const hoursFromNowIso = (hours) => new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
 const secondsFromNowIso = (seconds) => new Date(Date.now() + seconds * 1000).toISOString()
@@ -929,12 +931,13 @@ const toApplicantProfileDocument = (profile, sourceCollection = APPLICANT_REGIST
     baseProfile.admin_direct_messages || baseProfile.adminDirectMessages,
   )
 
-  return stripUndefined({
-    id: uid,
-    uid,
-    public_id: text(baseProfile.public_id || registration.public_id),
-    email: normalizeEmail(baseProfile.email),
-    role: 'applicant',
+    return stripUndefined({
+      id: uid,
+      uid,
+      public_id: text(baseProfile.public_id || registration.public_id),
+      email: normalizeEmail(baseProfile.email),
+      created_by: text(baseProfile.created_by || registration.created_by),
+      role: 'applicant',
     name: text(baseProfile.name) || `${firstName} ${lastName}`.trim() || 'Applicant',
     approval_status: text(baseProfile.approval_status) || 'pending',
     email_verified: baseProfile.email_verified === true,
@@ -946,9 +949,10 @@ const toApplicantProfileDocument = (profile, sourceCollection = APPLICANT_REGIST
     ban_duration: text(baseProfile.ban_duration),
     banned_until: text(baseProfile.banned_until),
     sort_order: normalizedSortOrder,
-    applicant_registration: stripUndefined({
-      ...registration,
-      first_name: firstName,
+      applicant_registration: stripUndefined({
+        ...registration,
+        created_by: text(registration.created_by || baseProfile.created_by),
+        first_name: firstName,
       last_name: lastName,
       created_at: text(registration.created_at) || text(baseProfile.created_at),
       submitted_at: text(registration.submitted_at) || text(baseProfile.created_at),
@@ -1120,14 +1124,17 @@ const toApplicantRecord = (profile) => {
   const applicantEmail = normalizeEmail(profile.email)
   const sortOrder = Number(profile?.sort_order ?? registration?.sort_order)
 
-  return {
-    id: profile.id,
-    public_id: text(profile.public_id || registration.public_id),
-    approval_status: text(profile.approval_status) || 'pending',
+    return {
+      id: profile.id,
+      public_id: text(profile.public_id || registration.public_id),
+      created_by: text(profile.created_by || registration.created_by),
+      approval_status: text(profile.approval_status) || 'pending',
     created_at: text(profile.created_at) || text(registration.created_at),
     submitted_at: text(registration.submitted_at) || text(profile.created_at),
     reviewed_at: text(profile.reviewed_at),
     rejection_reason: text(profile.rejection_reason),
+    rejection_image_url: text(profile.rejection_image_url),
+    rejection_confirmation_status: text(profile.rejection_confirmation_status),
     ban_reason: text(profile.ban_reason),
     ban_duration: text(profile.ban_duration),
     banned_until: text(profile.banned_until),
@@ -1177,10 +1184,11 @@ const toApplicantRecord = (profile) => {
 }
 
 const toEmployerRecord = (profile) => {
-  const normalizedRecord = {
-    id: profile.id,
-    public_id: text(profile.public_id),
-    approval_status: text(profile.approval_status) || 'pending',
+    const normalizedRecord = {
+      id: profile.id,
+      public_id: text(profile.public_id),
+      created_by: text(profile.created_by),
+      approval_status: text(profile.approval_status) || 'pending',
     email_verified: profile.email_verified === true,
     email_verified_at: text(profile.email_verified_at),
     created_at: text(profile.created_at),
@@ -2136,6 +2144,7 @@ const buildAdminCreatedApplicantProfile = ({ uid, createdAt, form }) =>
     id: uid,
     uid,
     email: normalizeEmail(form.email),
+    created_by: 'admin',
     role: 'applicant',
     name: `${text(form.firstName)} ${text(form.middleName)} ${text(form.lastName)}`.replace(/\s+/g, ' ').trim() || 'Applicant',
     approval_status: 'pending',
@@ -2144,11 +2153,12 @@ const buildAdminCreatedApplicantProfile = ({ uid, createdAt, form }) =>
     created_at: createdAt,
     reviewed_at: '',
     rejection_reason: '',
-    ban_reason: '',
-    ban_duration: '',
-    banned_until: '',
-    applicant_registration: {
-      first_name: text(form.firstName),
+      ban_reason: '',
+      ban_duration: '',
+      banned_until: '',
+      applicant_registration: {
+        created_by: 'admin',
+        first_name: text(form.firstName),
       middle_name: text(form.middleName),
       last_name: text(form.lastName),
       sex: '',
@@ -2191,6 +2201,7 @@ const buildAdminCreatedEmployerProfile = ({ uid, createdAt, form }) =>
     id: uid,
     uid,
     email: normalizeEmail(form.email),
+    created_by: 'admin',
     role: 'employer',
     name: text(form.companyName) || 'Employer',
     approval_status: 'pending',
@@ -3240,6 +3251,8 @@ export const updateEmployerApprovalStatus = async (employerId, payload) => {
     approval_status: nextStatus,
     reviewed_at: nowIso(),
     rejection_reason: nextStatus === 'rejected' ? text(payload?.rejectionReason) : '',
+    rejection_image_url: nextStatus === 'rejected' ? text(payload?.rejectionImageUrl) : '',
+    rejection_confirmation_status: nextStatus === 'rejected' ? text(payload?.rejectionConfirmationStatus || 'pending') : '',
     ban_duration: '',
     ban_reason: '',
     banned_until: '',
@@ -3261,10 +3274,59 @@ export const updateEmployerApprovalStatus = async (employerId, payload) => {
     metadata: {
       approval_status: nextStatus,
       rejection_reason: text(payload?.rejectionReason),
+      rejection_image_url: text(payload?.rejectionImageUrl),
+      rejection_confirmation_status: text(payload?.rejectionConfirmationStatus || ''),
     },
   })
 
   return toEmployerRecord(profile)
+}
+
+export const sendBusinessRejectionConfirmationEmail = async (payload = {}) => {
+  await waitForAuthReady()
+
+  const callable = httpsCallable(cloudFunctions, 'sendBusinessRejectionConfirmationEmail')
+
+  try {
+    const response = await callable({
+      employerId: text(payload?.employerId),
+      email: normalizeEmail(payload?.email),
+      businessName: text(payload?.businessName || payload?.companyName),
+      rejectionReason: text(payload?.rejectionReason),
+      rejectionImageUrl: text(payload?.rejectionImageUrl),
+    })
+
+    return response?.data || {}
+  } catch (error) {
+    throw new Error(
+      text(error?.message || error?.details) || 'Unable to send the business rejection email right now.',
+    )
+  }
+}
+
+export const confirmBusinessRejection = async (payload = {}) => {
+  const response = await fetch(buildHttpFunctionUrl('confirmBusinessRejectionHttp'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      employerId: text(payload?.employerId),
+      token: text(payload?.token),
+    }),
+  }).catch(() => {
+    throw new Error('Unable to confirm this business rejection right now.')
+  })
+
+  const body = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new Error(
+      text(body?.error?.message || body?.message) || 'Unable to confirm this business rejection right now.',
+    )
+  }
+
+  return body || {}
 }
 
 export const updateEmployerAdminDetails = async (employerId, payload = {}) => {

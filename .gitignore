@@ -2,3 +2,9 @@ functions/.env
 data-frontend/node_modules/
 data-frontend/dist/
 .vercel/
+.agent.md
+.codex-tmp/
+codex-backups/
+firebase-debug.log
+local-backup-*.patch
+data-frontend/Proximity_HireablePWD/

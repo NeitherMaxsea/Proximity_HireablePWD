@@ -827,12 +827,25 @@
 
 .applicant-page-enter-active,
 .applicant-page-leave-active {
-  transition: opacity 0.2s ease;
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease;
 }
 
-.applicant-page-enter-from,
+.applicant-page-enter-from {
+  opacity: 0;
+  transform: translate3d(0, 10px, 0);
+}
+
 .applicant-page-leave-to {
   opacity: 0;
+  transform: none;
+}
+
+.applicant-page-enter-to,
+.applicant-page-leave-from {
+  opacity: 1;
+  transform: none;
 }
 
 .applicant-main {
@@ -2087,6 +2100,18 @@
   font-weight: 600;
 }
 
+@keyframes applicant-overview-card-enter {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
 .applicant-stats-grid {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 1rem;
@@ -2108,6 +2133,51 @@
     0 16px 28px rgba(15, 23, 42, 0.08),
     0 6px 14px rgba(52, 109, 78, 0.04);
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.applicant-overview-intro,
+.applicant-grid--overview .applicant-stat-card--summary,
+.applicant-grid--overview .applicant-lower-grid > .applicant-panel {
+  opacity: 0;
+  transform: translate3d(0, 12px, 0);
+  animation: applicant-overview-card-enter 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.applicant-overview-intro {
+  animation-delay: 70ms;
+}
+
+.applicant-grid--overview .applicant-stat-card--summary:nth-child(1) {
+  animation-delay: 140ms;
+}
+
+.applicant-grid--overview .applicant-stat-card--summary:nth-child(2) {
+  animation-delay: 200ms;
+}
+
+.applicant-grid--overview .applicant-stat-card--summary:nth-child(3) {
+  animation-delay: 260ms;
+}
+
+.applicant-grid--overview .applicant-stat-card--summary:nth-child(4) {
+  animation-delay: 320ms;
+}
+
+.applicant-grid--overview .applicant-lower-grid:first-of-type > .applicant-panel:nth-child(1) {
+  animation-delay: 380ms;
+}
+
+.applicant-grid--overview .applicant-lower-grid:first-of-type > .applicant-panel:nth-child(2) {
+  animation-delay: 440ms;
+}
+
+.applicant-grid--overview .applicant-lower-grid:last-of-type > .applicant-panel:nth-child(1) {
+  animation-delay: 500ms;
+}
+
+.applicant-grid--overview .applicant-lower-grid:last-of-type > .applicant-panel:nth-child(2) {
+  animation-delay: 560ms;
 }
 
 .applicant-stat-card--summary:hover {
@@ -2204,6 +2274,23 @@
   background: rgba(248, 250, 252, 0.98);
   border-color: rgba(203, 213, 225, 0.72);
   color: #475569;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .applicant-page-enter-active,
+  .applicant-page-leave-active {
+    transition: none !important;
+  }
+
+  .applicant-page-enter-from,
+  .applicant-page-leave-to,
+  .applicant-overview-intro,
+  .applicant-grid--overview .applicant-stat-card--summary,
+  .applicant-grid--overview .applicant-lower-grid > .applicant-panel {
+    opacity: 1 !important;
+    transform: none !important;
+    animation: none !important;
+  }
 }
 
 .applicant-grid--overview .applicant-recommendation-card,
@@ -5832,6 +5919,51 @@
 
   .applicant-profile-save-confirm__actions {
     grid-template-columns: 1fr;
+  }
+}
+
+.applicant-main :deep(.applicant-section-loader) {
+  min-height: min(24rem, 52vh);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 0.7rem;
+  padding: 1.5rem;
+  border: 1px solid rgba(191, 205, 196, 0.72);
+  border-radius: 1.6rem;
+  background:
+    radial-gradient(circle at top, rgba(156, 214, 182, 0.18), transparent 54%),
+    rgba(255, 255, 255, 0.94);
+  box-shadow: 0 18px 34px rgba(25, 46, 34, 0.08);
+  text-align: center;
+}
+
+.applicant-main :deep(.applicant-section-loader__orb) {
+  width: 2.9rem;
+  height: 2.9rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2b6c46 0%, #8ed0ab 100%);
+  box-shadow: 0 14px 28px rgba(43, 108, 70, 0.2);
+  animation: applicant-section-loader-float 1.1s ease-in-out infinite alternate;
+}
+
+.applicant-main :deep(.applicant-section-loader__title) {
+  font-size: 1rem;
+  color: #183126;
+}
+
+.applicant-main :deep(.applicant-section-loader__copy) {
+  color: #658070;
+  font-size: 0.92rem;
+}
+
+@keyframes applicant-section-loader-float {
+  from {
+    transform: translateY(-3px) scale(0.97);
+  }
+
+  to {
+    transform: translateY(3px) scale(1);
   }
 }
 

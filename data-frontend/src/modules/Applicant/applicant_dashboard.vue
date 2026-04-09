@@ -1,19 +1,12 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, defineComponent, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { collection, getDocs, query, where } from 'firebase/firestore'
 import AppToast from '@/components/AppToast.vue'
 import ApplicantSettingsModal from '@/authenticator/setting_app.vue'
-import ApplicantMyProfile from '@/modules/Applicant/applicant-myprofile.vue'
 import ApplicantNavbar from '@/modules/Applicant/applicant_navbar.vue'
-import ApplicantApplications from '@/modules/Applicant/applicant_applications.vue'
-import ApplicantContracts from '@/modules/Applicant/applicant_contracts.vue'
 import ApplicantFindJobs from '@/modules/Applicant/applicant_findjobs.vue'
-import ApplicantInbox from '@/modules/Applicant/applicant_inbox.vue'
-import ApplicantInterviews from '@/modules/Applicant/applicant_interviews.vue'
-import ApplicantJobOffers from '@/modules/Applicant/applicant_job_offers.vue'
 import ApplicantSidebar from '@/modules/Applicant/applicant_sidebar.vue'
-import ApplicantTechnicalAssessment from '@/modules/Applicant/applicant_technical_assessment.vue'
 import {
   clearAuthSession,
   getApplicantApprovalStatus,
@@ -39,6 +32,40 @@ import {
 } from '@/lib/business_workspace_records'
 import { getPublicJobs, subscribeToJobDocumentStates, subscribeToPublicJobs } from '@/lib/jobs'
 import { mediaUrl } from '@/lib/media'
+
+const createApplicantSectionLoader = (label) => defineComponent({
+  name: 'ApplicantSectionLoader',
+  setup() {
+    return () => h(
+      'div',
+      {
+        class: 'applicant-section-loader',
+        role: 'status',
+        'aria-live': 'polite',
+        'aria-label': `Loading ${label}`,
+      },
+      [
+        h('span', { class: 'applicant-section-loader__orb', 'aria-hidden': 'true' }),
+        h('strong', { class: 'applicant-section-loader__title' }, 'Loading section'),
+        h('span', { class: 'applicant-section-loader__copy' }, `Preparing ${label}...`),
+      ],
+    )
+  },
+})
+
+const lazyApplicantSection = (loader, label) => defineAsyncComponent({
+  loader,
+  delay: 120,
+  loadingComponent: createApplicantSectionLoader(label),
+})
+
+const ApplicantApplications = lazyApplicantSection(() => import('@/modules/Applicant/applicant_applications.vue'), 'applications')
+const ApplicantContracts = lazyApplicantSection(() => import('@/modules/Applicant/applicant_contracts.vue'), 'contracts')
+const ApplicantInbox = lazyApplicantSection(() => import('@/modules/Applicant/applicant_inbox.vue'), 'inbox')
+const ApplicantInterviews = lazyApplicantSection(() => import('@/modules/Applicant/applicant_interviews.vue'), 'interviews')
+const ApplicantJobOffers = lazyApplicantSection(() => import('@/modules/Applicant/applicant_job_offers.vue'), 'job offers')
+const ApplicantMyProfile = lazyApplicantSection(() => import('@/modules/Applicant/applicant-myprofile.vue'), 'profile')
+const ApplicantTechnicalAssessment = lazyApplicantSection(() => import('@/modules/Applicant/applicant_technical_assessment.vue'), 'technical assessment')
 
 const router = useRouter()
 const activeSection = ref('find-jobs')

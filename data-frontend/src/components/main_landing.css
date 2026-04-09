@@ -107,14 +107,6 @@
   animation-delay: 0.32s;
 }
 
-.loading-overlay-leave-active {
-  transition: opacity 0.75s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.loading-overlay-leave-to {
-  opacity: 0;
-}
-
 .hero-search-loading-title {
   margin: 0.5rem 0 0;
   color: #17231d;
@@ -252,10 +244,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .loading-overlay-leave-active {
-    transition: none;
-  }
-
   .loading-screen__panel,
   .loading-screen__logo,
   .loading-screen__aurora,

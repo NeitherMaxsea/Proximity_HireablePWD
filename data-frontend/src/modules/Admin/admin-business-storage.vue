@@ -37,6 +37,8 @@ const formatDate = (value) => {
   })
 }
 
+const formatAccountId = (value) => String(value || '').trim().replace(/^#\s*/, '') || 'Pending ID'
+
 const documentPathsForEmployee = (employee) => ([
   employee?.company_verification_document_1_path,
   employee?.company_verification_document_2_path,
@@ -48,7 +50,7 @@ const businessStorageRows = computed(() =>
     const documents = documentPathsForEmployee(employee)
     return {
       id: String(employee?.id || '').trim(),
-      accountId: String(employee?.public_id || '').trim() || 'Pending ID',
+      accountId: formatAccountId(employee?.public_id),
       businessName: String(employee?.company_name || employee?.name || employee?.user?.name || 'Business').trim(),
       email: String(employee?.email || employee?.user?.email || 'No email').trim() || 'No email',
       status: titleCaseText(employee?.approval_status, 'Pending'),

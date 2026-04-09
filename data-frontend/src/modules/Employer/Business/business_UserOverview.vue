@@ -104,7 +104,6 @@ const emit = defineEmits([
     <div class="business-user-overview__table-shell">
       <div class="business-user-overview__table">
         <div class="business-user-overview__head">
-          <span>#</span>
           <span>ID</span>
           <span>User</span>
           <span>Role</span>
@@ -119,7 +118,6 @@ const emit = defineEmits([
             :key="`${user.id}-${user.email}-${index}`"
             class="business-user-overview__row"
           >
-            <div>{{ index + 1 }}</div>
             <div class="business-user-overview__id">{{ user.id }}</div>
 
             <div class="business-user-overview__account">

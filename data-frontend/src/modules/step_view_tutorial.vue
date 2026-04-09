@@ -245,10 +245,8 @@ const openStep = (stepNumber) => {
   bottom: 0.9rem;
   left: 1.35rem;
   height: 0.28rem;
-  background: linear-gradient(90deg, rgba(27, 138, 84, 0.18) 0%, rgba(27, 138, 84, 0.95) 50%, rgba(27, 138, 84, 0.18) 100%);
-  box-shadow:
-    0 0 14px rgba(27, 138, 84, 0.32),
-    0 0 26px rgba(27, 138, 84, 0.18);
+  background: #e0e0e0;
+  box-shadow: none;
 }
 
 .open-source-landing__card-meta {
@@ -352,8 +350,8 @@ const openStep = (stepNumber) => {
 .open-source-landing__panel-preview {
   margin-top: 1.2rem;
   padding: 0.9rem;
-  border: 1px solid rgba(27, 138, 84, 0.14);
-  background: linear-gradient(180deg, rgba(235, 247, 239, 0.82) 0%, rgba(244, 251, 246, 0.98) 100%);
+  border: 1px solid #e0e0e0;
+  background: #fff;
 }
 
 .open-source-landing__panel-screen {
@@ -361,7 +359,7 @@ const openStep = (stepNumber) => {
   overflow: hidden;
   min-height: 18rem;
   padding: 1rem;
-  background: linear-gradient(145deg, rgba(13, 43, 28, 0.98) 0%, rgba(23, 90, 58, 0.92) 100%);
+  background: #f5f5f5;
 }
 
 .open-source-landing__panel-screen::before {
@@ -376,15 +374,7 @@ const openStep = (stepNumber) => {
 }
 
 .open-source-landing__panel-glow {
-  position: absolute;
-  top: -10%;
-  right: -8%;
-  width: 10rem;
-  height: 10rem;
-  border-radius: 999px;
-  background: radial-gradient(circle, rgba(112, 255, 183, 0.48) 0%, rgba(112, 255, 183, 0) 68%);
-  filter: blur(10px);
-  animation: open-source-float 4.8s ease-in-out infinite alternate;
+  display: none;
 }
 
 .open-source-landing__panel-tag {

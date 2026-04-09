@@ -36,7 +36,6 @@ let slideInterval
 let revealObserver
 let scrollFrame = 0
 let heroSearchNavigateTimeout
-let loginNavigateTimeout
 let featuredJobDetailsTimeout
 let stopPublicJobsSubscription = () => {}
 
@@ -491,9 +490,6 @@ const navigateToLogin = async () => {
   isLoginRouteLoading.value = true
 
   try {
-    await new Promise((resolve) => {
-      loginNavigateTimeout = window.setTimeout(resolve, 320)
-    })
     await router.push('/login')
   } finally {
     isLoginRouteLoading.value = false
@@ -558,7 +554,6 @@ onBeforeUnmount(() => {
   }
   stopHeroSlider()
   window.clearTimeout(heroSearchNavigateTimeout)
-  window.clearTimeout(loginNavigateTimeout)
   window.clearTimeout(featuredJobDetailsTimeout)
   stopPublicJobsSubscription()
   stopPublicJobsSubscription = () => {}
@@ -676,7 +671,10 @@ onBeforeUnmount(() => {
           :disabled="isLoginRouteLoading"
           @click="navigateToLogin"
         >
-          <span>Login</span>
+          <span class="inline-flex items-center gap-2">
+            <i v-if="isLoginRouteLoading" class="bi bi-arrow-repeat animate-spin" aria-hidden="true" />
+            <span>{{ isLoginRouteLoading ? 'Loading...' : 'Login' }}</span>
+          </span>
         </button>
       </nav>
 
@@ -774,7 +772,10 @@ onBeforeUnmount(() => {
             :disabled="isLoginRouteLoading"
             @click="navigateToLogin"
           >
-            Login
+            <span class="inline-flex items-center gap-2">
+              <i v-if="isLoginRouteLoading" class="bi bi-arrow-repeat animate-spin" aria-hidden="true" />
+              <span>{{ isLoginRouteLoading ? 'Loading...' : 'Login' }}</span>
+            </span>
           </button>
         </div>
       </aside>
@@ -945,7 +946,6 @@ onBeforeUnmount(() => {
                 </div>
 
                 <button class="hero-search__button" :class="{ 'hero-search__button--loading': isHeroSearchLoading }" type="submit" :disabled="isHeroSearchLoading">
-                  <span v-if="isHeroSearchLoading" class="hero-search__button-spinner" aria-hidden="true" />
                   <span>{{ isHeroSearchLoading ? 'Searching...' : 'Search' }}</span>
                 </button>
               </form>
@@ -955,7 +955,6 @@ onBeforeUnmount(() => {
            </div>
           </div>
 
-      
           <div
             class="landing-hero__visual landing-rise-in relative z-[1] -mt-16 flex w-full max-w-[560px] self-start justify-end justify-self-end pl-0 pr-10 pt-2 max-[900px]:-mt-6 max-[900px]:justify-center max-[900px]:justify-self-center max-[900px]:pt-0 max-[900px]:pr-0"
             style="animation-delay: 0.24s;"
@@ -1004,7 +1003,7 @@ onBeforeUnmount(() => {
               <p class="section-steps__subtitle">
                 Join thousands of PWD individuals who have found meaningful employment through our platform.
               </p>
-              <a class="section-steps__cta" href="/login">
+              <a class="section-steps__cta" href="/login" @click.prevent="navigateToLogin">
                 <i class="bi bi-arrow-right-circle" />
                 <span>Start Journey</span>
               </a>
@@ -1357,6 +1356,7 @@ onBeforeUnmount(() => {
               <a
                 class="inline-flex items-center justify-center gap-2 rounded-[0.95rem] border border-[#dbe4de] bg-white px-[1.2rem] py-[0.95rem] text-[#2f3f38] transition duration-200 hover:-translate-y-0.5 hover:border-[#c8d5cd] hover:bg-[#f7faf8]"
                 href="/login"
+                @click.prevent="navigateToLogin"
               >
                 <i class="bi bi-bookmark" />
                 <span>Save</span>
@@ -1364,6 +1364,7 @@ onBeforeUnmount(() => {
               <a
                 class="inline-flex items-center justify-center gap-2 rounded-[0.95rem] bg-[#1b8a54] px-[1.2rem] py-[0.95rem] font-semibold text-white transition duration-200 hover:-translate-y-0.5 hover:bg-[#177547]"
                 href="/login"
+                @click.prevent="navigateToLogin"
               >
                 <i class="bi bi-send" />
                 <span>Apply Now</span>
@@ -1497,7 +1498,7 @@ onBeforeUnmount(() => {
             <a href="#home">Home</a>
             <a href="#featured-jobs">Featured Jobs</a>
             <a href="#section-01">Popular Categories</a>
-            <a href="/login">Start Journey</a>
+            <a href="/login" @click.prevent="navigateToLogin">Start Journey</a>
           </div>
 
           <div class="landing-footer__column">

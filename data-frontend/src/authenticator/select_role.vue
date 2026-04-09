@@ -1,17 +1,14 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import logoPwd from '@/assets/logo-pwd.png'
 import mathLogo from '@/assets/math.png'
-import titleLogo from '@/assets/pwdlogo.png'
 import applicantPreview from '@/assets/register.png'
 import employerPreview from '@/assets/handshake.png'
 
 const router = useRouter()
-const isVisible = ref(true)
+const isVisible = ref(false)
 const isNavigating = ref(false)
 const hoveredRole = ref(null)
-let timerId
 
 const roleCards = computed(() => [
   {
@@ -44,62 +41,78 @@ const roleCards = computed(() => [
 
 const getRoleVisual = (role) => (hoveredRole.value === role.key ? role.activeVisual : role.preview)
 
-const clearTimer = () => {
-  if (timerId) {
-    window.clearTimeout(timerId)
-    timerId = null
+const handleRolePreviewStart = (roleKey) => {
+  hoveredRole.value = roleKey
+}
+
+const handleRolePreviewEnd = (roleKey) => {
+  if (hoveredRole.value === roleKey) {
+    hoveredRole.value = null
   }
 }
 
 const runExitThen = (next) => {
   if (isNavigating.value) return
   isNavigating.value = true
-  clearTimer()
-  timerId = window.setTimeout(next, 180)
+  ;(async () => {
+    try {
+      const didNavigate = await next()
+      if (didNavigate === false) {
+        isNavigating.value = false
+      }
+    } catch {
+      isNavigating.value = false
+    }
+  })()
 }
 
 const goRegister = (role) => {
   localStorage.setItem('selectedRole', role)
   localStorage.setItem('uiLanguage', 'en')
-  runExitThen(() => {
-    router.push({
+  runExitThen(async () => {
+    const navigationResult = await router.push({
       path: '/register',
       query: { role, force: '1' },
     })
+    return !navigationResult
   })
 }
 
 const goBack = () => {
   localStorage.removeItem('selectedRole')
   localStorage.setItem('uiLanguage', 'en')
-  runExitThen(() => {
-    router.push('/login')
+  runExitThen(async () => {
+    const navigationResult = await router.push('/login')
+    return !navigationResult
   })
 }
 
 onMounted(() => {
   localStorage.removeItem('selectedRole')
   localStorage.setItem('uiLanguage', 'en')
+  if (typeof window !== 'undefined') {
+    window.requestAnimationFrame(() => {
+      isVisible.value = true
+    })
+  } else {
+    isVisible.value = true
+  }
 })
 
-onBeforeUnmount(() => {
-  clearTimer()
-})
 </script>
 
 <template>
-  <div class="role-auth-page">
+  <div
+    class="role-auth-page"
+    :class="{
+      'has-hovered-role': Boolean(hoveredRole),
+    }"
+  >
     <div class="role-auth-container">
       <button type="button" class="role-back-btn" :disabled="isNavigating" @click="goBack">
         <i class="bi bi-arrow-left" aria-hidden="true" />
         <span>Back to Login</span>
       </button>
-
-      <transition name="role-route-overlay">
-        <div v-if="isNavigating" class="role-route-overlay" aria-hidden="true">
-          <div class="role-route-overlay__spinner" />
-        </div>
-      </transition>
 
       <div
         class="role-auth-right"
@@ -121,13 +134,13 @@ onBeforeUnmount(() => {
             v-for="role in roleCards"
             :key="role.key"
             class="role-option-card"
-            :class="role.key"
+            :class="[role.key, { 'is-hovered': hoveredRole === role.key }]"
             type="button"
             :disabled="isNavigating"
-            @mouseenter="hoveredRole = role.key"
-            @mouseleave="hoveredRole = hoveredRole === role.key ? null : hoveredRole"
-            @focus="hoveredRole = role.key"
-            @blur="hoveredRole = hoveredRole === role.key ? null : hoveredRole"
+            @mouseenter="handleRolePreviewStart(role.key)"
+            @mouseleave="handleRolePreviewEnd(role.key)"
+            @focus="handleRolePreviewStart(role.key)"
+            @blur="handleRolePreviewEnd(role.key)"
             @click="goRegister(role.key)"
           >
             <span class="role-option-media" aria-hidden="true">
@@ -164,7 +177,12 @@ onBeforeUnmount(() => {
 
         <div class="role-tutorial-callout">
           <p class="role-tutorial-callout__text">Don't know how to continue?</p>
-          <button type="button" class="role-tutorial-callout__link" :disabled="isNavigating" @click="runExitThen(() => router.push('/step-view-tutorial'))">
+          <button
+            type="button"
+            class="role-tutorial-callout__link"
+            :disabled="isNavigating"
+            @click="runExitThen(async () => !(await router.push('/step-view-tutorial')))"
+          >
             Here's a tutorial
           </button>
         </div>

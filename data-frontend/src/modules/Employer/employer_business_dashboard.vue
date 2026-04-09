@@ -1,8 +1,35 @@
 <script setup>
-import { computed, onErrorCaptured, ref } from 'vue'
+import { computed, defineAsyncComponent, defineComponent, h, onErrorCaptured, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import BusinessWorkspaceFlow from '@/modules/Employer/Business/business-flow.vue'
 import { clearAuthSession, getStoredAuthUser } from '@/lib/auth'
+
+const createBusinessWorkspaceLoader = (label) => defineComponent({
+  name: 'BusinessWorkspaceLoader',
+  setup() {
+    return () => h(
+      'div',
+      {
+        class: 'business-dashboard-loader',
+        role: 'status',
+        'aria-live': 'polite',
+        'aria-label': `Loading ${label}`,
+      },
+      [
+        h(
+          'span',
+          { class: 'business-dashboard-loader__dots', 'aria-hidden': 'true' },
+          [h('span'), h('span'), h('span')],
+        ),
+      ],
+    )
+  },
+})
+
+const BusinessWorkspaceFlow = defineAsyncComponent({
+  loader: () => import('@/modules/Employer/Business/business-flow.vue'),
+  delay: 120,
+  loadingComponent: createBusinessWorkspaceLoader('business workspace'),
+})
 
 const router = useRouter()
 const workspaceError = ref('')
@@ -71,31 +98,66 @@ const goToLogin = async () => {
 </script>
 
 <template>
-  <BusinessWorkspaceFlow v-if="!workspaceError" :key="workspaceRenderKey" />
+  <transition name="business-dashboard-loader-fade" mode="out-in">
+    <BusinessWorkspaceFlow v-if="!workspaceError" :key="workspaceRenderKey" />
 
-  <section v-else class="business-dashboard-fallback">
-    <article class="business-dashboard-fallback__card">
-      <span class="business-dashboard-fallback__eyebrow">Business Workspace</span>
-      <h1>{{ businessName }}</h1>
-      <p v-if="businessEmail" class="business-dashboard-fallback__email">{{ businessEmail }}</p>
-      <strong>The business page hit a loading error.</strong>
-      <p class="business-dashboard-fallback__copy">
-        The workspace could not finish loading. Try reloading the workspace first.
-      </p>
-      <p class="business-dashboard-fallback__error">{{ workspaceErrorMessage }}</p>
-      <div class="business-dashboard-fallback__actions">
-        <button type="button" class="business-dashboard-fallback__button business-dashboard-fallback__button--primary" @click="reloadWorkspace">
-          Reload Workspace
-        </button>
-        <button type="button" class="business-dashboard-fallback__button business-dashboard-fallback__button--secondary" @click="goToLogin">
-          Back to Login
-        </button>
-      </div>
-    </article>
-  </section>
+    <section v-else class="business-dashboard-fallback">
+      <article class="business-dashboard-fallback__card">
+        <span class="business-dashboard-fallback__eyebrow">Business Workspace</span>
+        <h1>{{ businessName }}</h1>
+        <p v-if="businessEmail" class="business-dashboard-fallback__email">{{ businessEmail }}</p>
+        <strong>The business page hit a loading error.</strong>
+        <p class="business-dashboard-fallback__copy">
+          The workspace could not finish loading. Try reloading the workspace first.
+        </p>
+        <p class="business-dashboard-fallback__error">{{ workspaceErrorMessage }}</p>
+        <div class="business-dashboard-fallback__actions">
+          <button type="button" class="business-dashboard-fallback__button business-dashboard-fallback__button--primary" @click="reloadWorkspace">
+            Reload Workspace
+          </button>
+          <button type="button" class="business-dashboard-fallback__button business-dashboard-fallback__button--secondary" @click="goToLogin">
+            Back to Login
+          </button>
+        </div>
+      </article>
+    </section>
+  </transition>
 </template>
 
 <style scoped>
+.business-dashboard-loader {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  padding: 1.5rem;
+  background: linear-gradient(180deg, #f4f8f4 0%, #fbfdfb 100%);
+}
+
+.business-dashboard-loader__dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  color: #2f6a49;
+}
+
+.business-dashboard-loader__dots span {
+  width: 0.32rem;
+  height: 0.32rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.35;
+  animation: business-dashboard-dot-pulse 0.9s ease-in-out infinite;
+}
+
+.business-dashboard-loader__dots span:nth-child(2) {
+  animation-delay: 0.12s;
+}
+
+.business-dashboard-loader__dots span:nth-child(3) {
+  animation-delay: 0.24s;
+}
+
 .business-dashboard-fallback {
   min-height: 100vh;
   display: grid;
@@ -175,5 +237,28 @@ const goToLogin = async () => {
 .business-dashboard-fallback__button--secondary {
   background: #edf5f0;
   color: #1f4f34;
+}
+
+.business-dashboard-loader-fade-enter-active,
+.business-dashboard-loader-fade-leave-active {
+  transition: opacity 0.22s ease;
+}
+
+.business-dashboard-loader-fade-enter-from,
+.business-dashboard-loader-fade-leave-to {
+  opacity: 0;
+}
+
+@keyframes business-dashboard-dot-pulse {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+
+  50% {
+    transform: translateY(-0.14rem);
+    opacity: 1;
+  }
 }
 </style>

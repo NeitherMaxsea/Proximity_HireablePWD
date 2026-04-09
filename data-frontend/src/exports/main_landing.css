@@ -146,12 +146,12 @@
   padding: 0 1rem;
   border: 0;
   border-radius: 0.72rem;
-  background: linear-gradient(135deg, #1b8a54 0%, #0f5a35 100%);
+  background: linear-gradient(135deg, #4a90e2 0%, #357ab7 100%);
   color: #fff;
   font-size: 0.8rem;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 14px 28px rgba(17, 93, 56, 0.3);
+  box-shadow: 0 14px 28px rgba(74, 144, 226, 0.18);
 }
 
 .landing-primary-button,
@@ -167,7 +167,7 @@
 }
 
 .landing-primary-button {
-  background: linear-gradient(135deg, #1b8a54 0%, #0f5a35 100%);
+  background: linear-gradient(135deg, #4a90e2 0%, #357ab7 100%);
   color: #fff;
 }
 

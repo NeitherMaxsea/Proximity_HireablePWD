@@ -38,7 +38,6 @@ let searchTimer
 let onScrollHandler
 let onKeydownHandler
 let onDocClickHandler
-let loginTimer
 let toastTimer
 let stopPublicJobsSubscription = () => {}
 
@@ -320,9 +319,6 @@ async function navigateToLogin() {
   if (loginSubmitting.value) return
   loginSubmitting.value = true
   try {
-    await new Promise((resolve) => {
-      loginTimer = window.setTimeout(resolve, 320)
-    })
     await router.push('/login')
   } finally {
     loginSubmitting.value = false
@@ -472,7 +468,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.clearTimeout(searchTimer)
-  window.clearTimeout(loginTimer)
   window.clearTimeout(toastTimer)
   stopPublicJobsSubscription()
   if (onScrollHandler) window.removeEventListener('scroll', onScrollHandler)
@@ -518,7 +513,12 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
-        <button type="button" class="search-landing-nav__cta" :disabled="loginSubmitting" @click="navigateToLogin">Login</button>
+        <button type="button" class="search-landing-nav__cta" :disabled="loginSubmitting" @click="navigateToLogin">
+          <span style="display:inline-flex;align-items:center;gap:.45rem;">
+            <i v-if="loginSubmitting" class="bi bi-arrow-repeat" aria-hidden="true" style="animation:spin .75s linear infinite;" />
+            <span>{{ loginSubmitting ? 'Loading...' : 'Login' }}</span>
+          </span>
+        </button>
       </nav>
     </header>
 

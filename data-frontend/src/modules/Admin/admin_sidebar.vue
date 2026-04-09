@@ -117,7 +117,6 @@ defineEmits([
           <i :class="item.icon" aria-hidden="true" />
           <span>{{ item.label }}</span>
         </span>
-        <span v-if="item.badge" class="admin-nav-button__badge">{{ item.badge }}</span>
       </button>
 
       <div class="admin-dropdown-group">
@@ -133,7 +132,6 @@ defineEmits([
             <span>User Management</span>
           </span>
           <span class="admin-nav-button__right">
-            <span v-if="userManagementBadge" class="admin-nav-button__badge">{{ userManagementBadge }}</span>
             <span class="admin-nav-button__chevron" :class="{ 'is-open': userManagementOpen }">
               <i class="bi bi-chevron-down" aria-hidden="true" />
             </span>
@@ -154,7 +152,6 @@ defineEmits([
                 <i :class="item.icon" aria-hidden="true" />
                 <span>{{ item.label }}</span>
               </span>
-              <span v-if="item.badge" class="admin-nav-button__badge">{{ item.badge }}</span>
             </button>
           </div>
         </Transition>
@@ -173,7 +170,6 @@ defineEmits([
             <span>Subscription Management</span>
           </span>
           <span class="admin-nav-button__right">
-            <span v-if="paymentManagementBadge" class="admin-nav-button__badge">{{ paymentManagementBadge }}</span>
             <span class="admin-nav-button__chevron" :class="{ 'is-open': paymentManagementOpen }">
               <i class="bi bi-chevron-down" aria-hidden="true" />
             </span>
@@ -194,7 +190,6 @@ defineEmits([
                 <i :class="item.icon" aria-hidden="true" />
                 <span>{{ item.label }}</span>
               </span>
-              <span v-if="item.badge" class="admin-nav-button__badge">{{ item.badge }}</span>
             </button>
           </div>
         </Transition>
@@ -213,7 +208,6 @@ defineEmits([
             <span>Job Management</span>
           </span>
           <span class="admin-nav-button__right">
-            <span v-if="jobManagementBadge" class="admin-nav-button__badge">{{ jobManagementBadge }}</span>
             <span class="admin-nav-button__chevron" :class="{ 'is-open': jobManagementOpen }">
               <i class="bi bi-chevron-down" aria-hidden="true" />
             </span>
@@ -234,7 +228,6 @@ defineEmits([
                 <i :class="item.icon" aria-hidden="true" />
                 <span>{{ item.label }}</span>
               </span>
-              <span v-if="item.badge" class="admin-nav-button__badge">{{ item.badge }}</span>
             </button>
           </div>
         </Transition>
@@ -295,7 +288,6 @@ defineEmits([
             <i :class="item.icon" aria-hidden="true" />
             <span>{{ item.label }}</span>
           </span>
-          <span v-if="item.badge" class="admin-nav-button__badge">{{ item.badge }}</span>
         </button>
       </div>
     </div>
@@ -426,9 +418,9 @@ defineEmits([
 }
 
 .admin-nav-button.is-active {
-  border-color: var(--admin-theme-accent-border);
-  background: linear-gradient(135deg, var(--admin-theme-accent-soft) 0%, var(--admin-bg-surface) 100%);
-  box-shadow: var(--admin-shadow-soft);
+  border-color: transparent;
+  background: var(--admin-bg-hover);
+  box-shadow: none;
   color: var(--admin-theme-accent);
   transform: translateX(0);
 }

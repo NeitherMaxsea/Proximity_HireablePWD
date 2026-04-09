@@ -1,5 +1,6 @@
 <script setup>
 import { computed, toRefs } from 'vue'
+import '@/components/businesss.css'
 
 const props = defineProps([
   'businessCategory',

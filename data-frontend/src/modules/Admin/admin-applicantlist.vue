@@ -4,6 +4,7 @@ import '@fontsource/inter/500.css'
 import '@fontsource/inter/600.css'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import AdminSimpleModal from '@/modules/Admin/admin-simple-modal.vue'
+import RenderLoader from '@/components/renderloader.vue'
 import {
   deleteApplicantAccountRecord,
   updateApplicantAdminDetails,
@@ -37,6 +38,9 @@ const deletingApplicantIds = ref([])
 const selectMode = ref(false)
 const selectedApplicantIds = ref([])
 const isBulkDeletingApplicants = ref(false)
+const isBulkDeleteConfirmOpen = ref(false)
+const showBulkDeleteLoader = ref(false)
+const bulkDeleteLoaderSuccess = ref(false)
 const applicantEditForm = ref({
   first_name: '',
   last_name: '',
@@ -120,7 +124,21 @@ const newApplicantIdSet = computed(() => new Set(
     .map((value) => String(value || '').trim())
     .filter(Boolean),
 ))
-const isNewApplicant = (record) => newApplicantIdSet.value.has(applicantRecordId(record))
+const isNewApplicant = (record) =>
+  newApplicantIdSet.value.has(applicantRecordId(record)) && !record?.admin_seen
+
+// When a row is clicked, mark as seen in backend and open modal
+const handleApplicantRowClick = async (applicant) => {
+  const id = applicantRecordId(applicant)
+  if (id && !applicant.admin_seen) {
+    try {
+      await updateApplicantAdminDetails(id, { admin_seen: true })
+    } catch (error) {
+      console.error('Unable to mark applicant as seen.', error)
+    }
+  }
+  openApplicantModal('view', applicant)
+}
 
 const findApplicantById = (applicantId) =>
   (Array.isArray(props.applicants) ? props.applicants : []).find((record) => applicantRecordId(record) === applicantId) || null
@@ -351,6 +369,9 @@ const applicantModalSubtitle = computed(() => {
 })
 
 const applicantModalShowHeaderClose = computed(() => activeModal.value !== 'delete' && activeModal.value !== 'disable')
+const selectedApplicantDeleteCount = computed(() =>
+  [...new Set(selectedApplicantIds.value.filter(Boolean))].length,
+)
 
 const applicantDetailRows = computed(() => {
   const applicant = selectedApplicant.value
@@ -751,6 +772,23 @@ const handleApplicantDelete = async () => {
   }
 }
 
+const openBulkApplicantDeleteConfirm = () => {
+  if (isBulkDeletingApplicants.value) return
+
+  const applicantIds = [...new Set(selectedApplicantIds.value.filter(Boolean))]
+  if (!applicantIds.length) {
+    setActionNotice('error', 'Select at least one applicant to delete.')
+    return
+  }
+
+  isBulkDeleteConfirmOpen.value = true
+}
+
+const closeBulkApplicantDeleteConfirm = () => {
+  if (isBulkDeletingApplicants.value) return
+  isBulkDeleteConfirmOpen.value = false
+}
+
 const handleBulkApplicantDelete = async () => {
   const applicantIds = [...new Set(selectedApplicantIds.value.filter(Boolean))]
   if (!applicantIds.length) {
@@ -758,22 +796,30 @@ const handleBulkApplicantDelete = async () => {
     return
   }
 
+  isBulkDeleteConfirmOpen.value = false
   isBulkDeletingApplicants.value = true
+  showBulkDeleteLoader.value = true
+  bulkDeleteLoaderSuccess.value = false
 
   try {
-    for (const applicantId of applicantIds) {
-      await deleteApplicantAccountRecord(applicantId)
-    }
+    await Promise.all(applicantIds.map((applicantId) => deleteApplicantAccountRecord(applicantId)))
 
+    bulkDeleteLoaderSuccess.value = true
+    showBulkDeleteLoader.value = false
     deletingApplicantIds.value = [...new Set([...deletingApplicantIds.value, ...applicantIds])]
     selectedApplicantIds.value = []
     selectMode.value = false
-    setActionNotice('success', `${applicantIds.length} applicant${applicantIds.length === 1 ? '' : 's'} were deleted.`)
   } catch (error) {
+    showBulkDeleteLoader.value = false
+    bulkDeleteLoaderSuccess.value = false
     setActionNotice('error', String(error?.message || 'Unable to delete the selected applicants right now.'))
   } finally {
     isBulkDeletingApplicants.value = false
   }
+}
+
+const handleBulkDeleteLoaderHidden = () => {
+  bulkDeleteLoaderSuccess.value = false
 }
 </script>
 
@@ -798,7 +844,7 @@ const handleBulkApplicantDelete = async () => {
             @dragover="handleDeleteDropZoneDragOver"
             @dragleave="handleDeleteDropZoneDragLeave"
             @drop="handleDeleteDropZoneDrop"
-            @click="handleBulkApplicantDelete"
+            @click="openBulkApplicantDeleteConfirm"
           >
             <i class="bi bi-trash3" aria-hidden="true" />
             <span>
@@ -846,7 +892,6 @@ const handleBulkApplicantDelete = async () => {
                 @change="toggleSelectAllApplicants"
               >
             </th>
-            <th>#</th>
             <th>Applicant</th>
             <th>Contact</th>
             <th>Disability</th>
@@ -868,7 +913,7 @@ const handleBulkApplicantDelete = async () => {
               'is-dragging-source': draggedApplicantId === applicantRecordId(applicant),
             }"
             :draggable="!isSavingApplicantOrder && !selectMode"
-            @click="selectMode ? null : openApplicantModal('view', applicant)"
+            @click="selectMode ? null : handleApplicantRowClick(applicant)"
             @dragstart="handleApplicantDragStart($event, applicant)"
             @dragenter="handleApplicantRowDragEnter($event, applicant)"
             @dragover="handleApplicantRowDragOver($event, applicant)"
@@ -883,7 +928,6 @@ const handleBulkApplicantDelete = async () => {
                 @change="toggleApplicantSelection(applicant)"
               >
             </td>
-            <td>{{ index + 1 }}</td>
             <td>
               <div class="applicant-list-table__name">
                 <span class="applicant-list-table__avatar" aria-hidden="true">
@@ -947,17 +991,17 @@ const handleBulkApplicantDelete = async () => {
                 >
                   <i class="bi bi-x-circle" aria-hidden="true" />
                 </button>
-                <button
-                  v-if="isApplicantPending(applicant)"
-                  type="button"
-                  class="applicant-list-action-btn applicant-list-action-btn--danger"
-                  title="Delete"
-                  aria-label="Delete"
-                  :disabled="selectMode"
-                  @click.stop="openApplicantModal('delete', applicant)"
-                >
-                  <i class="bi bi-trash" aria-hidden="true" />
-                </button>
+                  <button
+                    v-if="isApplicantPending(applicant)"
+                    type="button"
+                    class="applicant-list-action-btn applicant-list-action-btn--warn"
+                    title="Disable Account"
+                    aria-label="Disable Account"
+                    :disabled="selectMode"
+                    @click.stop="openApplicantModal('disable', applicant)"
+                  >
+                    <i class="bi bi-slash-circle" aria-hidden="true" />
+                  </button>
                 <button
                   v-if="isApplicantApproved(applicant)"
                   type="button"
@@ -980,21 +1024,21 @@ const handleBulkApplicantDelete = async () => {
                 >
                   <i class="bi bi-slash-circle" aria-hidden="true" />
                 </button>
-                <button
-                  v-if="isApplicantApproved(applicant) || isApplicantBanned(applicant)"
-                  type="button"
-                  class="applicant-list-action-btn applicant-list-action-btn--danger"
-                  title="Delete"
-                  aria-label="Delete"
-                  :disabled="selectMode"
-                  @click.stop="openApplicantModal('delete', applicant)"
-                >
-                  <i class="bi bi-trash" aria-hidden="true" />
-                </button>
+                  <button
+                    v-if="isApplicantApproved(applicant) || isApplicantBanned(applicant)"
+                    type="button"
+                    class="applicant-list-action-btn applicant-list-action-btn--warn"
+                    title="Disable Account"
+                    aria-label="Disable Account"
+                    :disabled="selectMode"
+                    @click.stop="openApplicantModal('disable', applicant)"
+                  >
+                    <i class="bi bi-slash-circle" aria-hidden="true" />
+                  </button>
               </div>
             </td>
           </tr>
-          <tr v-if="!filteredApplicants.length">
+          <tr v-if="!filteredApplicants.length" key="empty-applicants">
             <td :colspan="selectMode ? 9 : 8">
               <div class="applicant-list-empty">No applicant records found.</div>
             </td>
@@ -1002,6 +1046,47 @@ const handleBulkApplicantDelete = async () => {
         </TransitionGroup>
       </table>
     </div>
+
+    <AdminSimpleModal
+      :open="isBulkDeleteConfirmOpen"
+      title="Delete Selected Applicants"
+      :subtitle="`This will permanently delete ${selectedApplicantDeleteCount} selected applicant${selectedApplicantDeleteCount === 1 ? '' : 's'} from the platform.`"
+      :show-close-button="false"
+      max-width="30rem"
+      @close="closeBulkApplicantDeleteConfirm"
+    >
+      <div class="applicant-modal__panel applicant-modal__panel--danger">
+        <div class="applicant-modal__danger-icon applicant-modal__danger-icon--delete" aria-hidden="true">
+          <i class="bi bi-trash3" />
+        </div>
+        <p class="applicant-modal__copy">
+          Are you sure you want to delete <strong>{{ selectedApplicantDeleteCount }}</strong>
+          selected applicant{{ selectedApplicantDeleteCount === 1 ? '' : 's' }}?
+        </p>
+        <p class="applicant-modal__warning">
+          This action cannot be undone and will remove the selected applicant accounts from the platform.
+        </p>
+      </div>
+
+      <template #actions>
+        <button
+          type="button"
+          class="applicant-modal__button applicant-modal__button--ghost"
+          :disabled="isBulkDeletingApplicants"
+          @click="closeBulkApplicantDeleteConfirm"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="applicant-modal__button applicant-modal__button--danger"
+          :disabled="isBulkDeletingApplicants"
+          @click="handleBulkApplicantDelete"
+        >
+          {{ isBulkDeletingApplicants ? 'Deleting...' : 'Yes, Delete Selected' }}
+        </button>
+      </template>
+    </AdminSimpleModal>
 
     <AdminSimpleModal
       :open="Boolean(activeModal && selectedApplicant)"
@@ -1221,6 +1306,20 @@ const handleBulkApplicantDelete = async () => {
         </button>
       </template>
     </AdminSimpleModal>
+
+    <Teleport to="body">
+      <RenderLoader
+        :visible="showBulkDeleteLoader"
+        :success="bulkDeleteLoaderSuccess"
+        message="Deleting the selected applicant accounts and permissions..."
+        success-message="Successfully deleted the selected applicant accounts."
+        :toast-visible="bulkDeleteLoaderSuccess"
+        toast-title="Applicants Deleted"
+        :toast-message="bulkDeleteLoaderSuccess ? 'Successfully deleted the selected applicant accounts.' : ''"
+        toast-kind="success"
+        @hidden="handleBulkDeleteLoaderHidden"
+      />
+    </Teleport>
 
     <Teleport to="body">
       <Transition name="applicant-approval-waterfall">
@@ -1511,11 +1610,14 @@ const handleBulkApplicantDelete = async () => {
 }
 
 .applicant-list-table-shell {
-  overflow: hidden;
+  overflow: auto;
+  max-height: min(68vh, 56rem);
   border: 1px solid rgba(122, 179, 145, 0.14);
   border-radius: 0.8rem;
   background: #fff;
   box-shadow: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(117, 148, 130, 0.45) transparent;
 }
 
 .applicant-list-table {
@@ -1524,6 +1626,9 @@ const handleBulkApplicantDelete = async () => {
 }
 
 .applicant-list-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   padding: 0.82rem 0.9rem;
   text-align: left;
   color: #6d8576;
@@ -1860,6 +1965,18 @@ const handleBulkApplicantDelete = async () => {
   background: rgba(252, 239, 239, 0.98);
   color: #a54545;
   border-color: rgba(214, 120, 92, 0.28);
+}
+
+.applicant-list-action-btn--warn {
+  border-color: rgba(165, 106, 17, 0.24);
+  color: #8b5a10;
+  background: rgba(255, 248, 235, 0.98);
+}
+
+.applicant-list-action-btn--warn:hover {
+  background: rgba(255, 243, 219, 0.98);
+  color: #a56a11;
+  border-color: rgba(165, 106, 17, 0.32);
 }
 
 .applicant-list-action-btn--danger {
@@ -2489,7 +2606,8 @@ const handleBulkApplicantDelete = async () => {
   }
 
   .applicant-list-table-shell {
-    overflow-x: auto;
+    overflow: auto;
+    max-height: min(62vh, 48rem);
   }
 
   .applicant-list-table {

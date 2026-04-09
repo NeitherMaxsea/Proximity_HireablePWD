@@ -92,8 +92,25 @@ const buildInitials = (value, fallback = 'US') => {
   return parts.map((part) => part.charAt(0).toUpperCase()).join('')
 }
 
+const resolveCreatedByValue = (record = {}) => String(
+  record?.created_by
+  || record?.createdBy
+  || record?.metadata?.created_by
+  || record?.metadata?.createdBy
+  || '',
+).trim()
+
+const resolveRegistrationType = (record = {}) =>
+  resolveCreatedByValue(record).toLowerCase() === 'admin' ? 'Register by Admin' : 'Self Register'
+
+const formatRoleLabel = (value) => {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'employer') return 'Business'
+  return formatStatusLabel(normalized, 'User')
+}
+
 const formatUserId = (value) => {
-  const normalized = String(value || '').trim()
+  const normalized = String(value || '').trim().replace(/^#\s*/, '')
   if (normalized) return normalized
   return 'Pending ID'
 }
@@ -133,6 +150,7 @@ const normalizedUsers = computed(() => {
     activityStatus: resolveActivityStatus(record),
     activityStatusLabel: formatActivityStatusLabel(resolveActivityStatus(record), 'Unknown'),
     date: record?.created_at || record?.submitted_at || '',
+    registrationType: resolveRegistrationType(record),
     avatarClass: 'admin-all-user__avatar--applicant',
     initials: buildInitials(
       `${record?.first_name || ''} ${record?.last_name || ''}`.trim()
@@ -154,6 +172,7 @@ const normalizedUsers = computed(() => {
     activityStatus: resolveActivityStatus(record),
     activityStatusLabel: formatActivityStatusLabel(resolveActivityStatus(record), 'Unknown'),
     date: record?.created_at || '',
+    registrationType: resolveRegistrationType(record),
     avatarClass: 'admin-all-user__avatar--employer',
     initials: buildInitials(record?.company_name || record?.name || record?.user?.name, 'EM'),
   }))
@@ -245,7 +264,7 @@ const emptyStateCopy = computed(() => {
         <select v-model="roleFilter">
           <option value="all">All</option>
           <option value="applicant">Applicant</option>
-          <option value="employer">Employer</option>
+          <option value="employer">Business</option>
         </select>
       </label>
 
@@ -284,13 +303,11 @@ const emptyStateCopy = computed(() => {
     <div class="admin-all-user__table-shell">
       <div class="admin-all-user__table">
         <div class="admin-all-user__head">
-          <span>#</span>
           <span>ID</span>
           <span>User</span>
           <span>Role</span>
-          <span>{{ tableStatusHeading }}</span>
+          <span>Register Type</span>
           <span>Date</span>
-          <span>Actions</span>
         </div>
 
         <TransitionGroup name="admin-all-user-row" tag="div" class="admin-all-user__body">
@@ -299,7 +316,6 @@ const emptyStateCopy = computed(() => {
             :key="user.id || `${user.role}-${user.email}-${index}`"
             class="admin-all-user__row"
           >
-            <div>{{ index + 1 }}</div>
             <div class="admin-all-user__id">{{ user.accountId }}</div>
 
             <div class="admin-all-user__account">
@@ -316,33 +332,13 @@ const emptyStateCopy = computed(() => {
               </div>
             </div>
 
-            <div class="admin-all-user__role">{{ user.role }}</div>
-            <div>
-              <span class="admin-all-user__status" :class="`is-${resolveDisplayedStatusClass(user)}`">{{ resolveDisplayedStatus(user) }}</span>
-            </div>
-            <div>{{ formatDisplayDate(user.date) }}</div>
-            <div class="admin-all-user__actions">
-              <button
-                v-if="allowMessageAction"
-                type="button"
-                class="admin-all-user__action-btn admin-all-user__action-btn--message"
-                title="Message"
-                aria-label="Message"
-                @click="emit('message-user', user)"
-              >
-                <i class="bi bi-chat-dots" aria-hidden="true" />
-              </button>
-              <button type="button" class="admin-all-user__action-btn" title="Disable" aria-label="Disable" @click="emit('open-user', { ...user, action: 'disable' })">
-                <i class="bi bi-slash-circle" aria-hidden="true" />
-              </button>
-              <button type="button" class="admin-all-user__action-btn admin-all-user__action-btn--danger" title="Delete" aria-label="Delete" @click="emit('open-user', { ...user, action: 'delete' })">
-                <i class="bi bi-trash" aria-hidden="true" />
-              </button>
-            </div>
-          </article>
-        </TransitionGroup>
+              <div class="admin-all-user__role">{{ formatRoleLabel(user.role) }}</div>
+              <div class="admin-all-user__origin">{{ user.registrationType }}</div>
+              <div>{{ formatDisplayDate(user.date) }}</div>
+            </article>
+          </TransitionGroup>
+        </div>
       </div>
-    </div>
 
     <div v-if="!filteredUsers.length" class="admin-all-user__empty">
       {{ emptyStateCopy }}
@@ -362,7 +358,7 @@ const emptyStateCopy = computed(() => {
 .admin-all-user__table-shell { overflow-x: auto; overflow-y: hidden; border: 1px solid rgba(213, 226, 219, 0.92); border-radius: 1.2rem; background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(247, 251, 249, 0.96) 100%); }
 .admin-all-user__table { display: grid; min-width: 980px; }
 .admin-all-user__body { display: grid; }
-.admin-all-user__head, .admin-all-user__row { display: grid; grid-template-columns: 4.5rem minmax(8rem, 0.9fr) minmax(16rem, 2fr) minmax(8rem, 0.8fr) minmax(8rem, 0.8fr) minmax(8rem, 0.8fr) minmax(11rem, 1.1fr); align-items: center; gap: 1rem; padding: 0.95rem 1rem; }
+.admin-all-user__head, .admin-all-user__row { display: grid; grid-template-columns: 4.5rem minmax(8rem, 0.95fr) minmax(16rem, 2.15fr) minmax(8rem, 0.8fr) minmax(10rem, 1fr) minmax(8rem, 0.9fr); align-items: center; gap: 1rem; padding: 0.95rem 1rem; }
 .admin-all-user__head { color: #709180; font-size: 0.78rem; font-weight: 800; border-bottom: 1px solid rgba(221, 231, 225, 0.92); background: rgba(248, 252, 249, 0.92); }
 .admin-all-user__row { color: #234334; font-size: 0.88rem; border-bottom: 1px solid rgba(235, 241, 237, 0.96); transition: background-color 0.22s ease, transform 0.22s ease, opacity 0.22s ease; }
 .admin-all-user__row:hover { background: rgba(247, 251, 249, 0.78); }
@@ -379,6 +375,7 @@ const emptyStateCopy = computed(() => {
 .admin-all-user__meta span { color: #728578; font-size: 0.8rem; }
 .admin-all-user__new-badge { display: inline-flex; align-items: center; justify-content: center; min-height: 1.3rem; padding: 0 0.45rem; border-radius: 999px; background: rgba(34, 197, 94, 0.14); color: #18794e; font-size: 0.63rem; font-weight: 900; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
 .admin-all-user__role { text-transform: capitalize; }
+.admin-all-user__origin { color: #556d60; font-size: 0.8rem; font-weight: 700; }
 .admin-all-user__status { display: inline-flex; align-items: center; justify-content: center; min-height: 2rem; padding: 0 0.7rem; border-radius: 999px; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
 .admin-all-user__status.is-approved { background: #edf9f1; color: #1f7a47; }
 .admin-all-user__status.is-active { background: #edf9f1; color: #1f7a47; }
@@ -401,7 +398,7 @@ const emptyStateCopy = computed(() => {
 .admin-all-user-row-move { transition: transform 0.22s ease; }
 @media (max-width: 980px) {
   .admin-all-user__toolbar { grid-template-columns: 1fr; }
-  .admin-all-user__head, .admin-all-user__row { grid-template-columns: 3rem minmax(7rem, 0.9fr) minmax(12rem, 1.8fr) minmax(7rem, 0.9fr) minmax(7rem, 0.9fr) minmax(7rem, 0.9fr) minmax(11rem, 1fr); }
+  .admin-all-user__head, .admin-all-user__row { grid-template-columns: 3rem minmax(7rem, 0.95fr) minmax(12rem, 1.9fr) minmax(7rem, 0.8fr) minmax(8rem, 1fr) minmax(7rem, 0.9fr); }
   .admin-all-user__summary { justify-content: flex-start; }
 }
 

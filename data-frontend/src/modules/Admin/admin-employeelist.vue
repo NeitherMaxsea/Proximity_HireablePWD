@@ -6,10 +6,13 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import AdminSimpleModal from '@/modules/Admin/admin-simple-modal.vue'
 import {
   deleteEmployerAccountRecord,
+  sendBusinessRejectionConfirmationEmail,
   updateEmployerAdminDetails,
   updateEmployerApprovalStatus,
   updateEmployerSortOrders,
 } from '@/lib/auth'
+import { storage } from '@/firebase'
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage'
 
 const props = defineProps({
   employees: {
@@ -44,6 +47,11 @@ const employeeEditForm = ref({
   company_location: '',
   company_category: '',
 })
+const rejectReason = ref('')
+const rejectImage = ref(null)
+const rejectImageUrl = ref('')
+const rejectImagePreviewUrl = ref('')
+const rejectImageName = ref('')
 const imagePreview = ref({
   open: false,
   src: '',
@@ -116,6 +124,11 @@ const titleCaseText = (value, fallback = 'Not set') => {
 
 const displayText = (value, fallback = 'Not set') =>
   String(value || '').trim() || fallback
+
+const formatDisplayId = (value, fallback = 'Not set') => {
+  const normalized = String(value || '').trim().replace(/^#\s*/, '')
+  return normalized || fallback
+}
 
 const getDocumentFileName = (value, fallback = 'Attached file') => {
   const text = String(value || '').trim()
@@ -460,6 +473,7 @@ watch(allFilteredEmployeeIds, (nextIds) => {
 onBeforeUnmount(() => {
   clearFreshEmployeeTimer()
   clearActionNoticeTimer()
+  resetRejectForm()
 })
 
 const employeeModalTitle = computed(() => {
@@ -517,7 +531,7 @@ const employeeOverviewCards = computed(() => {
   const documentCount = employeeVerificationDocuments.value.length
 
   return [
-    { label: 'Account ID', value: displayText(employee?.public_id, 'Pending ID') },
+    { label: 'Account ID', value: formatDisplayId(employee?.public_id, 'Pending ID') },
     { label: 'Status', value: titleCaseText(employee?.approval_status, 'Pending') },
     { label: 'Type', value: titleCaseText(employee?.company_organization_type || 'business', 'Business') },
     { label: 'Files', value: `${documentCount} ${documentCount === 1 ? 'document' : 'documents'}` },
@@ -543,8 +557,8 @@ const employeeAccountRows = computed(() => {
   if (!employee) return []
 
   return [
-    { label: 'User ID', value: displayText(employee?.id, 'Not set') },
-    { label: 'Public ID', value: displayText(employee?.public_id, 'Pending ID') },
+    { label: 'User ID', value: formatDisplayId(employee?.id, 'Not set') },
+    { label: 'Public ID', value: formatDisplayId(employee?.public_id, 'Pending ID') },
     { label: 'Email Verified', value: employee?.email_verified ? 'Verified' : 'Not verified' },
     { label: 'Created Date', value: formatEmployeeDate(employee?.created_at) },
     { label: 'Reviewed Date', value: formatEmployeeDate(employee?.reviewed_at) },
@@ -655,10 +669,22 @@ const actionNoticeTitle = computed(() =>
   actionNotice.value?.kind === 'error' ? 'Action failed' : 'Success',
 )
 
+const resetRejectForm = () => {
+  rejectReason.value = ''
+  rejectImage.value = null
+  rejectImageUrl.value = ''
+  rejectImageName.value = ''
+  if (rejectImagePreviewUrl.value && typeof URL !== 'undefined') {
+    URL.revokeObjectURL(rejectImagePreviewUrl.value)
+  }
+  rejectImagePreviewUrl.value = ''
+}
+
 const resetEmployeeModal = () => {
   activeModal.value = ''
   selectedEmployee.value = null
   closeImagePreview()
+  resetRejectForm()
   editEmployeeStatus.value = 'pending'
   modalError.value = ''
   employeeEditForm.value = {
@@ -845,6 +871,9 @@ const openEmployeeModal = (type, employee) => {
       company_category: String(employee?.company_category || '').trim(),
     }
   }
+  if (type === 'reject') {
+    resetRejectForm()
+  }
 }
 
 const buildEmployeeStatusPayload = (status) => {
@@ -883,8 +912,63 @@ const handleEmployeeApprove = async () => {
   await handleEmployeeStatusUpdate('approved', 'was approved.')
 }
 
+const handleRejectImageChange = async (event) => {
+  const file = event?.target?.files?.[0] || null
+
+  if (rejectImagePreviewUrl.value && typeof URL !== 'undefined') {
+    URL.revokeObjectURL(rejectImagePreviewUrl.value)
+  }
+
+  if (!file) {
+    rejectImage.value = null
+    rejectImageName.value = ''
+    rejectImagePreviewUrl.value = ''
+    return
+  }
+
+  rejectImage.value = file
+  rejectImageName.value = String(file.name || 'Attached image').trim()
+  rejectImagePreviewUrl.value = typeof URL !== 'undefined' ? URL.createObjectURL(file) : ''
+}
+
 const handleEmployeeReject = async () => {
-  await handleEmployeeStatusUpdate('rejected', 'was rejected.')
+  if (!selectedEmployee.value?.id) return
+  if (!String(rejectReason.value || '').trim()) {
+    modalError.value = 'Please enter the reason for rejecting this business.'
+    return
+  }
+
+  isSubmitting.value = true
+  modalError.value = ''
+  try {
+    let uploadedRejectImageUrl = ''
+
+    if (rejectImage.value) {
+      const safeFileName = String(rejectImage.value.name || 'attachment')
+        .replace(/[^\w.-]+/g, '-')
+        .replace(/-+/g, '-')
+      const storageRefPath = `business-rejection-images/${selectedEmployee.value.id}/${Date.now()}-${safeFileName}`
+      const storageRefObj = storageRef(storage, storageRefPath)
+      await uploadBytes(storageRefObj, rejectImage.value)
+      uploadedRejectImageUrl = await getDownloadURL(storageRefObj)
+    }
+    rejectImageUrl.value = uploadedRejectImageUrl
+
+    const currentEmployeeName = employeeDisplayName(selectedEmployee.value)
+    await sendBusinessRejectionConfirmationEmail({
+      employerId: selectedEmployee.value.id,
+      email: employeeEmail(selectedEmployee.value),
+      businessName: currentEmployeeName,
+      rejectionReason: String(rejectReason.value || '').trim(),
+      rejectionImageUrl: uploadedRejectImageUrl,
+    })
+    resetEmployeeModal()
+    setActionNotice('success', `Rejection email sent to ${currentEmployeeName}. Waiting for user confirmation.`)
+  } catch (error) {
+    modalError.value = String(error?.message || 'Unable to reject this business right now.')
+  } finally {
+    isSubmitting.value = false
+  }
 }
 
 const handleEmployeeQuickApprove = async (employee) => {
@@ -895,8 +979,7 @@ const handleEmployeeQuickApprove = async (employee) => {
 
 const handleEmployeeQuickReject = async (employee) => {
   selectedEmployee.value = employee
-  activeModal.value = ''
-  await handleEmployeeReject()
+  openEmployeeModal('reject', employee)
 }
 
 const isEmployeePending = (employee) =>
@@ -1062,8 +1145,7 @@ const handleBulkEmployeeDelete = async () => {
                 @change="toggleSelectAllEmployees"
               >
             </th>
-            <th>#</th>
-              <th>Business</th>
+            <th>Business</th>
             <th>Contact</th>
             <th>Location</th>
             <th>Status</th>
@@ -1098,7 +1180,6 @@ const handleBulkEmployeeDelete = async () => {
                 @change="toggleEmployeeSelection(employee)"
               >
             </td>
-            <td>{{ index + 1 }}</td>
             <td>
               <div class="employee-list-table__name">
                 <span class="employee-list-table__avatar" aria-hidden="true">
@@ -1164,13 +1245,13 @@ const handleBulkEmployeeDelete = async () => {
                 <button
                   v-if="isEmployeePending(employee)"
                   type="button"
-                  class="employee-list-action-btn employee-list-action-btn--danger"
-                  title="Delete"
-                  aria-label="Delete"
-                  :disabled="selectMode"
-                  @click.stop="openEmployeeModal('delete', employee)"
-                >
-                  <i class="bi bi-trash" aria-hidden="true" />
+                    class="employee-list-action-btn employee-list-action-btn--warn"
+                    title="Deactivate"
+                    aria-label="Deactivate"
+                    :disabled="selectMode"
+                    @click.stop="openEmployeeModal('disable', employee)"
+                  >
+                    <i class="bi bi-slash-circle" aria-hidden="true" />
                 </button>
                 <button
                   v-if="isEmployeeApproved(employee)"
@@ -1197,18 +1278,18 @@ const handleBulkEmployeeDelete = async () => {
                 <button
                   v-if="isEmployeeApproved(employee) || isEmployeeBanned(employee)"
                   type="button"
-                  class="employee-list-action-btn employee-list-action-btn--danger"
-                  title="Delete"
-                  aria-label="Delete"
-                  :disabled="selectMode"
-                  @click.stop="openEmployeeModal('delete', employee)"
-                >
-                  <i class="bi bi-trash" aria-hidden="true" />
+                    class="employee-list-action-btn employee-list-action-btn--warn"
+                    title="Deactivate"
+                    aria-label="Deactivate"
+                    :disabled="selectMode"
+                    @click.stop="openEmployeeModal('disable', employee)"
+                  >
+                    <i class="bi bi-slash-circle" aria-hidden="true" />
                 </button>
               </div>
             </td>
           </tr>
-          <tr v-if="!filteredEmployees.length">
+          <tr v-if="!filteredEmployees.length" key="empty-employees">
             <td :colspan="selectMode ? 8 : 7">
               <div class="employee-list-empty">No business records found.</div>
             </td>
@@ -1218,7 +1299,7 @@ const handleBulkEmployeeDelete = async () => {
     </div>
 
     <AdminSimpleModal
-      :open="Boolean(activeModal && selectedEmployee)"
+      :open="Boolean(activeModal && activeModal !== 'reject' && selectedEmployee)"
       :title="employeeModalTitle"
       :subtitle="employeeModalSubtitle"
       :show-close-button="employeeModalShowHeaderClose"
@@ -1245,7 +1326,7 @@ const handleBulkEmployeeDelete = async () => {
                   {{ titleCaseText(selectedEmployee?.approval_status, 'Pending') }}
                 </span>
                 <span class="employee-modal__hero-chip">
-                  {{ displayText(selectedEmployee?.public_id, 'Pending ID') }}
+                  {{ formatDisplayId(selectedEmployee?.public_id, 'Pending ID') }}
                 </span>
               </div>
             </div>
@@ -1429,6 +1510,7 @@ const handleBulkEmployeeDelete = async () => {
           :disabled="isSubmitting"
           @click="closeEmployeeModal"
         >
+          <i class="bi bi-check2-circle" aria-hidden="true" />
           {{ activeModal === 'view' ? 'Done' : 'Cancel' }}
         </button>
 
@@ -1439,6 +1521,7 @@ const handleBulkEmployeeDelete = async () => {
           :disabled="isSubmitting"
           @click="handleEmployeeSaveEdit"
         >
+          <i class="bi bi-pencil-square" aria-hidden="true" />
           {{ isSubmitting ? 'Saving...' : 'Save Rename' }}
         </button>
 
@@ -1449,6 +1532,7 @@ const handleBulkEmployeeDelete = async () => {
           :disabled="isSubmitting"
           @click="handleEmployeeApprove"
         >
+          <i class="bi bi-check2-circle" aria-hidden="true" />
           {{ isSubmitting ? 'Approving...' : 'Approve' }}
         </button>
 
@@ -1457,8 +1541,9 @@ const handleBulkEmployeeDelete = async () => {
           type="button"
           class="employee-modal__button employee-modal__button--warn"
           :disabled="isSubmitting"
-          @click="handleEmployeeReject"
+          @click="openEmployeeModal('reject', selectedEmployee)"
         >
+          <i class="bi bi-x-circle" aria-hidden="true" />
           {{ isSubmitting ? 'Rejecting...' : 'Reject' }}
         </button>
 
@@ -1469,6 +1554,7 @@ const handleBulkEmployeeDelete = async () => {
           :disabled="isSubmitting"
           @click="handleEmployeeDisable"
         >
+          <i class="bi bi-slash-circle" aria-hidden="true" />
           {{ isSubmitting ? 'Disabling...' : 'Disable Business' }}
         </button>
 
@@ -1479,8 +1565,69 @@ const handleBulkEmployeeDelete = async () => {
           :disabled="isSubmitting"
           @click="handleEmployeeDelete"
         >
+          <i v-if="!isSubmitting" class="bi bi-trash3" aria-hidden="true" />
           <span v-if="isSubmitting" class="employee-modal__button-spinner" aria-hidden="true" />
           {{ isSubmitting ? 'Deleting...' : 'Delete Business' }}
+        </button>
+      </template>
+    </AdminSimpleModal>
+
+    <AdminSimpleModal
+      :open="activeModal === 'reject' && Boolean(selectedEmployee)"
+      title="Reject Business"
+      :subtitle="selectedEmployee ? `Send the rejection reason to ${employeeDisplayName(selectedEmployee)}.` : ''"
+      :show-close-button="false"
+      max-width="34rem"
+      @close="closeEmployeeModal"
+    >
+        <div class="employee-reject-modal">
+          <label class="employee-reject-modal__field">
+            <span>Reason for rejection</span>
+            <textarea
+              v-model="rejectReason"
+              rows="5"
+              placeholder="Explain clearly why this business account is being rejected."
+            />
+          </label>
+
+          <label class="employee-reject-modal__field">
+            <span>Attach supporting image</span>
+            <input type="file" accept="image/*" @change="handleRejectImageChange" />
+            <small>Optional, but you can attach a screenshot or proof image for the business.</small>
+          </label>
+
+          <div v-if="rejectImagePreviewUrl" class="employee-reject-modal__preview">
+            <img :src="rejectImagePreviewUrl" :alt="rejectImageName || 'Reject attachment preview'" />
+            <div class="employee-reject-modal__preview-copy">
+              <strong>{{ rejectImageName || 'Attached image' }}</strong>
+              <span>Ready to send with the rejection notice.</span>
+            </div>
+          </div>
+
+          <div v-if="modalError" class="employee-modal__error">
+            {{ modalError }}
+          </div>
+        </div>
+
+      <template #actions>
+        <button
+          type="button"
+          class="employee-modal__button employee-modal__button--ghost"
+          :disabled="isSubmitting"
+          @click="closeEmployeeModal"
+        >
+          <i class="bi bi-arrow-left-circle" aria-hidden="true" />
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="employee-modal__button employee-modal__button--warn"
+          :disabled="isSubmitting"
+          @click="handleEmployeeReject"
+        >
+          <i v-if="!isSubmitting" class="bi bi-send" aria-hidden="true" />
+          <span v-if="isSubmitting" class="employee-modal__button-spinner" aria-hidden="true" />
+          {{ isSubmitting ? 'Sending Rejection...' : 'Send Rejection' }}
         </button>
       </template>
     </AdminSimpleModal>
@@ -1751,11 +1898,14 @@ const handleBulkEmployeeDelete = async () => {
 }
 
 .employee-list-table-shell {
-  overflow: hidden;
+  overflow: auto;
+  max-height: min(68vh, 56rem);
   border: 1px solid rgba(122, 179, 145, 0.14);
   border-radius: 0.8rem;
   background: #fff;
   box-shadow: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(117, 148, 130, 0.45) transparent;
 }
 
 .employee-list-table {
@@ -1764,6 +1914,9 @@ const handleBulkEmployeeDelete = async () => {
 }
 
 .employee-list-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   padding: 0.82rem 0.9rem;
   text-align: left;
   color: #6d8576;
@@ -2548,6 +2701,95 @@ const handleBulkEmployeeDelete = async () => {
   gap: 0.85rem;
 }
 
+.employee-reject-modal {
+  display: grid;
+  gap: 0.95rem;
+}
+
+.employee-reject-modal__field {
+  display: grid;
+  gap: 0.42rem;
+}
+
+.employee-reject-modal__field span {
+  color: #587363;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.employee-reject-modal__field small {
+  color: #70857a;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.employee-reject-modal__field textarea,
+.employee-reject-modal__field input[type='file'] {
+  width: 100%;
+  border: 1px solid rgba(122, 179, 145, 0.18);
+  border-radius: 0.75rem;
+  background: #ffffff;
+  color: #274234;
+  font: inherit;
+}
+
+.employee-reject-modal__field textarea {
+  min-height: 8rem;
+  padding: 0.8rem 0.9rem;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.employee-reject-modal__field textarea:focus,
+.employee-reject-modal__field input[type='file']:focus {
+  outline: none;
+  border-color: #79b293;
+  box-shadow: 0 0 0 3px rgba(46, 154, 98, 0.12);
+}
+
+.employee-reject-modal__field input[type='file'] {
+  min-height: 2.85rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.employee-reject-modal__preview {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.8rem;
+  border: 1px solid rgba(122, 179, 145, 0.14);
+  border-radius: 0.85rem;
+  background: rgba(247, 251, 248, 0.9);
+}
+
+.employee-reject-modal__preview img {
+  width: 5rem;
+  height: 5rem;
+  object-fit: cover;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(122, 179, 145, 0.14);
+  background: #ffffff;
+}
+
+.employee-reject-modal__preview-copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.employee-reject-modal__preview-copy strong {
+  color: #264333;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.employee-reject-modal__preview-copy span {
+  color: #6d8377;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
 .employee-modal__panel--danger {
   justify-items: center;
   text-align: center;
@@ -2617,43 +2859,62 @@ const handleBulkEmployeeDelete = async () => {
 }
 
 .employee-modal__button {
-  min-height: 2.6rem;
-  border: 0;
-  border-radius: 0.75rem;
-  padding: 0 0.95rem;
+  min-height: 2.45rem;
+  min-width: 6.9rem;
+  border: 1px solid #d7dfd9;
+  border-radius: 0.95rem;
+  padding: 0.55rem 1.15rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
   font: inherit;
-  font-size: 0.82rem;
-  font-weight: 700;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
   cursor: pointer;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.07);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.employee-modal__button i {
+  font-size: 0.82rem;
 }
 
 .employee-modal__button:disabled {
   cursor: wait;
-  opacity: 0.7;
+  opacity: 0.6;
+  transform: none;
+  box-shadow: none;
 }
 
 .employee-modal__button--ghost {
-  background: #eef4f0;
-  color: #476857;
+  border-color: #d8e2db;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbf9 100%);
+  color: #406452;
 }
 
 .employee-modal__button--primary {
-  background: #2c8a62;
-  color: #fff;
+  border-color: #d4e9db;
+  background: linear-gradient(180deg, #ffffff 0%, #eef8f2 100%);
+  color: #2c8358;
 }
 
 .employee-modal__button--warn {
-  background: #a56a11;
-  color: #fff;
+  border-color: #efdfbf;
+  background: linear-gradient(180deg, #ffffff 0%, #fff6ea 100%);
+  color: #9a6815;
 }
 
 .employee-modal__button--danger {
-  background: #a54545;
-  color: #fff;
+  border-color: #ebd1d1;
+  background: linear-gradient(180deg, #ffffff 0%, #fff1f1 100%);
+  color: #a54545;
+}
+
+.employee-modal__button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 24px rgba(15, 23, 42, 0.11);
 }
 
 .employee-modal__button-spinner {
@@ -2687,7 +2948,8 @@ const handleBulkEmployeeDelete = async () => {
   }
 
   .employee-list-table-shell {
-    overflow-x: auto;
+    overflow: auto;
+    max-height: min(62vh, 48rem);
   }
 
   .employee-list-table {

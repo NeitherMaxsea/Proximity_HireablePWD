@@ -1,4 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import MainLanding from '@/modules/main_landing.vue'
+import MainLogin from '@/authenticator/main_login.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -19,7 +21,7 @@ const router = createRouter({
     {
       path: '/',
       name: 'main_landing',
-      component: () => import('@/modules/main_landing.vue'),
+      component: MainLanding,
       meta: { title: 'PWD | Landing Page' },
     },
     {
@@ -37,7 +39,7 @@ const router = createRouter({
     {
       path: '/login',
       name: 'main_login',
-      component: () => import('@/authenticator/main_login.vue'),
+      component: MainLogin,
       meta: { title: 'PWD | Login' },
     },
     {
@@ -79,6 +81,12 @@ const router = createRouter({
       name: 'pending_approval',
       component: () => import('@/authenticator/pending_approval.vue'),
       meta: { title: 'PWD | Pending Approval' },
+    },
+    {
+      path: '/auth/business-rejection-confirmation',
+      name: 'business_rejection_confirmation',
+      component: () => import('@/authenticator/business_rejection_confirmation.vue'),
+      meta: { title: 'PWD | Confirm Business Rejection' },
     },
     {
       path: '/register/client-verification',

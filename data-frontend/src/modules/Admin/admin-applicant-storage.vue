@@ -37,6 +37,8 @@ const formatDate = (value) => {
   })
 }
 
+const formatAccountId = (value) => String(value || '').trim().replace(/^#\s*/, '') || 'Pending ID'
+
 const applicantDisplayName = (applicant) =>
   String(
     `${applicant?.first_name || ''} ${applicant?.last_name || ''}`.trim()
@@ -57,7 +59,7 @@ const applicantStorageRows = computed(() =>
     const documents = storageFilesForApplicant(applicant)
     return {
       id: String(applicant?.id || '').trim(),
-      accountId: String(applicant?.public_id || '').trim() || 'Pending ID',
+      accountId: formatAccountId(applicant?.public_id),
       applicantName: applicantDisplayName(applicant),
       email: String(applicant?.email || applicant?.user?.email || 'No email').trim() || 'No email',
       status: titleCaseText(applicant?.approval_status, 'Pending'),

@@ -3,14 +3,12 @@ import { toRefs } from 'vue'
 
 const props = defineProps([
   'activeSubscriptionOverview',
-  'openPaymentHistory',
   'subscriptionPlans',
   'handleSubscriptionPlanClick',
 ])
 
 const {
   activeSubscriptionOverview,
-  openPaymentHistory,
   subscriptionPlans,
   handleSubscriptionPlanClick,
 } = toRefs(props)
@@ -35,13 +33,6 @@ const {
         <h2>Business Subscription</h2>
         <p>Activate premium to unlock the full employer workspace and tools.</p>
       </div>
-      <button
-        type="button"
-        class="business-pricing-header__action"
-        @click="openPaymentHistory()"
-      >
-        Payment history
-      </button>
     </section>
 
     <section class="business-pricing">

@@ -54,6 +54,7 @@ const VERIFIED_REGISTRATION_TTL_MINUTES = 30
 const OTP_COOLDOWN_SECONDS = 60
 const OTP_MAX_ATTEMPTS = 5
 const OTP_MAX_RESENDS = 5
+const BUSINESS_REJECTION_CONFIRMATION_TTL_HOURS = 72
 const ADMIN_ROLES = new Set(['admin', 'system_admin'])
 
 const text = (value) => String(value || '').trim()
@@ -161,6 +162,8 @@ const hashOtp = (email, code) =>
   crypto.createHash('sha256').update(`${normalizeEmail(email)}:${text(code)}`).digest('hex')
 
 const createOtpCode = () => crypto.randomInt(0, 10 ** OTP_LENGTH).toString().padStart(OTP_LENGTH, '0')
+const createSecureToken = (size = 24) => crypto.randomBytes(size).toString('hex')
+const hashSecureToken = (value) => crypto.createHash('sha256').update(text(value)).digest('hex')
 
 const timestampToMillis = (value) => {
   if (!value) return 0
@@ -168,6 +171,25 @@ const timestampToMillis = (value) => {
   if (value instanceof Date) return value.getTime()
   return Number(value) || 0
 }
+
+const sanitizeBaseUrl = (value) => {
+  const raw = text(value)
+  if (!raw) return ''
+
+  try {
+    const parsed = new URL(raw)
+    return `${parsed.protocol}//${parsed.host}`
+  } catch {
+    return ''
+  }
+}
+
+const resolveAppBaseUrl = (requestLike) =>
+  sanitizeBaseUrl(process.env.APP_BASE_URL)
+  || sanitizeBaseUrl(requestLike?.rawRequest?.headers?.origin)
+  || sanitizeBaseUrl(requestLike?.headers?.origin)
+  || sanitizeBaseUrl(requestLike?.rawRequest?.headers?.referer)
+  || 'http://localhost:5173'
 
 const collectDocsFromReadRefs = async (readRefs = []) => {
   if (!readRefs.length) return []
@@ -891,6 +913,137 @@ const sendOtpEmail = async ({ email, code, companyName, organizationType, role, 
   })
 }
 
+const buildBusinessRejectionEmail = ({
+  businessName,
+  rejectionReason,
+  rejectionImageUrl,
+  confirmationUrl,
+}) => {
+  const safeBusinessName = escapeHtml(text(businessName) || 'your business account')
+  const safeReason = escapeHtml(rejectionReason).replace(/\n/g, '<br />')
+  const safeConfirmationUrl = escapeHtml(confirmationUrl)
+  const safeImageUrl = text(rejectionImageUrl)
+  const subject = 'Confirm your business account rejection notice'
+  const textBody = [
+    `Hello ${text(businessName) || 'Business'},`,
+    '',
+    'An admin prepared a rejection notice for your business account.',
+    'Please review the reason below and confirm it from the secure link before the rejection is finalized.',
+    '',
+    'Reason for rejection:',
+    rejectionReason,
+    '',
+    safeImageUrl ? `Supporting image: ${safeImageUrl}` : '',
+    `Confirmation link: ${confirmationUrl}`,
+    '',
+    `This confirmation link expires in ${BUSINESS_REJECTION_CONFIRMATION_TTL_HOURS} hours.`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  const htmlBody = `
+    <div style="margin:0; padding:0; background-color:#f3f7f4;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; background-color:#f3f7f4; margin:0; padding:0;">
+        <tr>
+          <td align="center" style="padding:32px 12px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px; width:100%; background-color:#ffffff; border:1px solid #dbe7df; border-radius:28px;">
+              <tr>
+                <td align="center" style="padding:34px 28px 20px; background:linear-gradient(180deg, #fffaf5 0%, #fff5e8 100%); border-bottom:1px solid #efe5d7;">
+                  <div style="width:84px; height:84px; margin:0 auto 14px; border-radius:999px; background:linear-gradient(180deg, #fff3df 0%, #ffe7c2 100%); color:#a36210; font-size:28px; font-weight:800; line-height:84px; text-align:center;">
+                    !
+                  </div>
+                  <div style="margin:0; color:#9a6815; font-family:Arial, sans-serif; font-size:11px; font-weight:800; letter-spacing:0.18em; text-transform:uppercase;">
+                    PWD Employment Assistant
+                  </div>
+                  <h1 style="margin:14px 0 8px; color:#17324d; font-family:Arial, sans-serif; font-size:28px; font-weight:800; line-height:1.2;">
+                    Confirm Rejection Notice
+                  </h1>
+                  <p style="margin:0 auto; max-width:460px; color:#5f6f67; font-family:Arial, sans-serif; font-size:15px; line-height:24px;">
+                    An admin prepared a rejection notice for <strong>${safeBusinessName}</strong>. Please review the details and confirm from the secure button below before the rejection is finalized.
+                  </p>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:24px 28px 18px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; background-color:#fbfdfc; border:1px solid #dce7df; border-radius:20px;">
+                    <tr>
+                      <td style="padding:18px 20px;">
+                        <div style="margin:0; color:#7b8d84; font-family:Arial, sans-serif; font-size:11px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase;">
+                          Reason For Rejection
+                        </div>
+                        <div style="margin:10px 0 0; color:#17324d; font-family:Arial, sans-serif; font-size:15px; line-height:24px;">
+                          ${safeReason}
+                        </div>
+                      </td>
+                    </tr>
+                  </table>
+
+                  ${safeImageUrl
+                    ? `
+                      <div style="margin-top:18px; padding:18px 20px; background-color:#fbfdfc; border:1px solid #dce7df; border-radius:20px;">
+                        <div style="margin:0 0 8px; color:#7b8d84; font-family:Arial, sans-serif; font-size:11px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase;">
+                          Supporting Image
+                        </div>
+                        <a href="${escapeHtml(safeImageUrl)}" target="_blank" rel="noopener noreferrer" style="color:#0f5d8c; font-family:Arial, sans-serif; font-size:14px; font-weight:700; text-decoration:none;">
+                          Open attachment
+                        </a>
+                      </div>
+                    `
+                    : ''}
+
+                  <div style="padding:24px 0 8px; text-align:center;">
+                    <a
+                      href="${safeConfirmationUrl}"
+                      style="display:inline-block; min-width:220px; padding:14px 24px; background:linear-gradient(180deg, #ffffff 0%, #fff5e8 100%); border:1px solid #efdfbf; border-radius:16px; color:#9a6815; font-family:Arial, sans-serif; font-size:15px; font-weight:800; text-decoration:none;"
+                    >
+                      Review And Confirm
+                    </a>
+                  </div>
+
+                  <p style="margin:12px 0 0; color:#5f6f67; font-family:Arial, sans-serif; font-size:14px; line-height:22px; text-align:center;">
+                    This secure confirmation link expires in <strong style="color:#17324d;">${BUSINESS_REJECTION_CONFIRMATION_TTL_HOURS} hours</strong>.
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </div>
+  `
+
+  return {
+    subject,
+    text: textBody,
+    html: htmlBody,
+  }
+}
+
+const sendBusinessRejectionEmail = async ({
+  email,
+  businessName,
+  rejectionReason,
+  rejectionImageUrl,
+  confirmationUrl,
+}) => {
+  requireSendGridConfig()
+
+  const message = buildBusinessRejectionEmail({
+    businessName,
+    rejectionReason,
+    rejectionImageUrl,
+    confirmationUrl,
+  })
+
+  await sgMail.send({
+    to: email,
+    from: process.env.SENDGRID_FROM_EMAIL,
+    subject: message.subject,
+    text: message.text,
+    html: message.html,
+  })
+}
+
 const assertOtpRecordMatchesPayload = (payload, otpData) => {
   if (!otpData) return
 
@@ -1164,6 +1317,196 @@ const verifyEmployerRegistrationOtpHandler = async (rawData) => {
   return {
     verified: true,
     email: maskEmail(payload.email),
+  }
+}
+
+const assertBusinessRejectionPayload = (data) => {
+  const employerId = text(data?.employerId)
+  const email = normalizeEmail(data?.email)
+  const businessName = text(data?.businessName || data?.companyName || 'Business')
+  const rejectionReason = text(data?.rejectionReason)
+  const rejectionImageUrl = text(data?.rejectionImageUrl)
+
+  if (!employerId) {
+    throw new HttpsError('invalid-argument', 'Choose a business account before sending the rejection email.')
+  }
+
+  if (!email || !isValidEmail(email)) {
+    throw new HttpsError('invalid-argument', 'A valid business email address is required.')
+  }
+
+  if (!rejectionReason) {
+    throw new HttpsError('invalid-argument', 'Enter the rejection reason before sending the email.')
+  }
+
+  if (rejectionImageUrl && !isValidHttpUrl(rejectionImageUrl)) {
+    throw new HttpsError('invalid-argument', 'The supporting image link is invalid.')
+  }
+
+  return {
+    employerId,
+    email,
+    businessName,
+    rejectionReason,
+    rejectionImageUrl,
+  }
+}
+
+const assertBusinessRejectionConfirmationPayload = (data) => {
+  const employerId = text(data?.employerId)
+  const token = text(data?.token)
+
+  if (!employerId) {
+    throw new HttpsError('invalid-argument', 'A valid business account is required.')
+  }
+
+  if (!token) {
+    throw new HttpsError('invalid-argument', 'This rejection confirmation link is invalid.')
+  }
+
+  return {
+    employerId,
+    token,
+  }
+}
+
+const sendBusinessRejectionConfirmationEmailHandler = async (request) => {
+  const { requesterUid } = await assertAdminRequest(request)
+  const payload = assertBusinessRejectionPayload(request?.data)
+  const [userSnapshot, employerSnapshot, requesterSnapshot] = await Promise.all([
+    db.collection(USERS_COLLECTION).doc(payload.employerId).get(),
+    db.collection(EMPLOYERS_COLLECTION).doc(payload.employerId).get(),
+    db.collection(USERS_COLLECTION).doc(requesterUid).get(),
+  ])
+
+  if (!userSnapshot.exists && !employerSnapshot.exists) {
+    throw new HttpsError('not-found', 'That business account no longer exists.')
+  }
+
+  const sourceProfile = {
+    ...(userSnapshot.exists ? userSnapshot.data() : {}),
+    ...(employerSnapshot.exists ? employerSnapshot.data() : {}),
+  }
+  const storedEmail = normalizeEmail(sourceProfile.email || payload.email)
+  if (!storedEmail || !isValidEmail(storedEmail)) {
+    throw new HttpsError('failed-precondition', 'The selected business account does not have a valid email.')
+  }
+
+  const now = Date.now()
+  const confirmationToken = createSecureToken()
+  const confirmationTokenHash = hashSecureToken(confirmationToken)
+  const confirmationUrl = `${resolveAppBaseUrl(request)}/auth/business-rejection-confirmation?employerId=${encodeURIComponent(payload.employerId)}&token=${encodeURIComponent(confirmationToken)}`
+  const requesterProfile = requesterSnapshot.exists ? requesterSnapshot.data() || {} : {}
+  const requesterName = text(requesterProfile.name || requesterProfile.email || requesterUid) || 'Admin'
+  const pendingPatch = {
+    approval_status: text(sourceProfile.approval_status) || 'pending',
+    reviewed_at: '',
+    rejection_reason: '',
+    rejection_image_url: '',
+    rejection_confirmation_status: 'awaiting_user_confirmation',
+    rejection_confirmation_sent_at: admin.firestore.FieldValue.serverTimestamp(),
+    rejection_confirmation_expires_at: admin.firestore.Timestamp.fromMillis(
+      now + BUSINESS_REJECTION_CONFIRMATION_TTL_HOURS * 60 * 60 * 1000,
+    ),
+    rejection_confirmation_token_hash: confirmationTokenHash,
+    pending_rejection_reason: payload.rejectionReason,
+    pending_rejection_image_url: payload.rejectionImageUrl,
+    pending_rejection_requested_by: requesterName,
+    pending_rejection_requested_by_uid: requesterUid,
+    pending_rejection_requested_at: admin.firestore.FieldValue.serverTimestamp(),
+  }
+
+  await Promise.all([
+    db.collection(USERS_COLLECTION).doc(payload.employerId).set(pendingPatch, { merge: true }),
+    db.collection(EMPLOYERS_COLLECTION).doc(payload.employerId).set(pendingPatch, { merge: true }),
+  ])
+
+  try {
+    await sendBusinessRejectionEmail({
+      email: storedEmail,
+      businessName: text(sourceProfile.company_name || sourceProfile.name || payload.businessName),
+      rejectionReason: payload.rejectionReason,
+      rejectionImageUrl: payload.rejectionImageUrl,
+      confirmationUrl,
+    })
+  } catch (error) {
+    console.error('Failed to send business rejection email', error)
+    throw toSendGridHttpsError(error)
+  }
+
+  return {
+    sent: true,
+    email: maskEmail(storedEmail),
+    businessName: text(sourceProfile.company_name || sourceProfile.name || payload.businessName) || 'Business',
+    confirmationStatus: 'awaiting_user_confirmation',
+  }
+}
+
+const confirmBusinessRejectionHandler = async (rawData) => {
+  const payload = assertBusinessRejectionConfirmationPayload(rawData)
+  const [userSnapshot, employerSnapshot] = await Promise.all([
+    db.collection(USERS_COLLECTION).doc(payload.employerId).get(),
+    db.collection(EMPLOYERS_COLLECTION).doc(payload.employerId).get(),
+  ])
+
+  if (!userSnapshot.exists && !employerSnapshot.exists) {
+    throw new HttpsError('not-found', 'That business account no longer exists.')
+  }
+
+  const sourceProfile = {
+    ...(userSnapshot.exists ? userSnapshot.data() : {}),
+    ...(employerSnapshot.exists ? employerSnapshot.data() : {}),
+  }
+  const confirmationStatus = text(sourceProfile.rejection_confirmation_status)
+  const storedTokenHash = text(sourceProfile.rejection_confirmation_token_hash)
+  const confirmationExpiresAt = timestampToMillis(sourceProfile.rejection_confirmation_expires_at)
+  const now = Date.now()
+
+  if (text(sourceProfile.approval_status) === 'rejected' && confirmationStatus === 'confirmed') {
+    return {
+      confirmed: true,
+      businessName: text(sourceProfile.company_name || sourceProfile.name) || 'Business',
+      status: 'already_confirmed',
+    }
+  }
+
+  if (confirmationStatus !== 'awaiting_user_confirmation' || !storedTokenHash) {
+    throw new HttpsError('failed-precondition', 'This rejection request is no longer waiting for confirmation.')
+  }
+
+  if (confirmationExpiresAt && confirmationExpiresAt < now) {
+    throw new HttpsError('deadline-exceeded', 'This rejection confirmation link has expired.')
+  }
+
+  if (storedTokenHash !== hashSecureToken(payload.token)) {
+    throw new HttpsError('permission-denied', 'This rejection confirmation link is invalid.')
+  }
+
+  const finalizedPatch = {
+    approval_status: 'rejected',
+    reviewed_at: nowIso(),
+    rejection_reason: text(sourceProfile.pending_rejection_reason || sourceProfile.rejection_reason),
+    rejection_image_url: text(sourceProfile.pending_rejection_image_url || sourceProfile.rejection_image_url),
+    rejection_confirmation_status: 'confirmed',
+    rejection_confirmed_at: admin.firestore.FieldValue.serverTimestamp(),
+    rejection_confirmation_token_hash: admin.firestore.FieldValue.delete(),
+    rejection_confirmation_expires_at: admin.firestore.FieldValue.delete(),
+    pending_rejection_reason: admin.firestore.FieldValue.delete(),
+    pending_rejection_image_url: admin.firestore.FieldValue.delete(),
+    pending_rejection_requested_by: admin.firestore.FieldValue.delete(),
+    pending_rejection_requested_by_uid: admin.firestore.FieldValue.delete(),
+    pending_rejection_requested_at: admin.firestore.FieldValue.delete(),
+  }
+
+  await Promise.all([
+    db.collection(USERS_COLLECTION).doc(payload.employerId).set(finalizedPatch, { merge: true }),
+    db.collection(EMPLOYERS_COLLECTION).doc(payload.employerId).set(finalizedPatch, { merge: true }),
+  ])
+
+  return {
+    confirmed: true,
+    businessName: text(sourceProfile.company_name || sourceProfile.name) || 'Business',
+    status: 'confirmed',
   }
 }
 
@@ -2650,6 +2993,9 @@ exports.resendEmployerRegistrationOtp = onCall(publicCallableOptions, async (req
 exports.verifyEmployerRegistrationOtp = onCall(publicCallableOptions, async (request) =>
   verifyEmployerRegistrationOtpHandler(request.data))
 
+exports.sendBusinessRejectionConfirmationEmail = onCall(async (request) =>
+  sendBusinessRejectionConfirmationEmailHandler(request))
+
 exports.deleteManagedAccount = onCall(async (request) =>
   deleteManagedAccountHandler(request.data, request))
 
@@ -2727,6 +3073,21 @@ exports.verifyEmployerRegistrationOtpHttp = onRequest(publicHttpOptions, async (
     response.status(200).json(result)
   } catch (error) {
     console.error('HTTP verify employer OTP failed', error)
+    sendHttpError(response, error)
+  }
+})
+
+exports.confirmBusinessRejectionHttp = onRequest(publicHttpOptions, async (request, response) => {
+  if (request.method !== 'POST') {
+    response.status(405).json({ error: { status: 'method-not-allowed', message: 'Use POST for this endpoint.' } })
+    return
+  }
+
+  try {
+    const result = await confirmBusinessRejectionHandler(readHttpPayload(request))
+    response.status(200).json(result)
+  } catch (error) {
+    console.error('HTTP confirm business rejection failed', error)
     sendHttpError(response, error)
   }
 })

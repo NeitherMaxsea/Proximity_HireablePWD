@@ -1,6 +1,7 @@
 <script setup>
 import '@fontsource/inter/500.css'
 import '@fontsource/inter/600.css'
+import NotificationAdmin from '@/modules/Admin/notification_admin.vue'
 
 defineEmits(['toggle-profile', 'logout', 'toggle-notifications', 'open-notification', 'open-setting'])
 
@@ -55,23 +56,6 @@ const props = defineProps({
   },
 })
 
-const formatNotificationBadge = (value) => {
-  const count = Number(value) || 0
-  return count > 99 ? '99+' : String(count)
-}
-
-const formatNotificationTime = (value) => {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return 'Just now'
-
-  return date.toLocaleString('en-US', {
-    month: 'short',
-    day: '2-digit',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-}
-
 const showBreadcrumbParent = () =>
   props.breadcrumbParent
   && props.breadcrumbCurrent
@@ -102,63 +86,13 @@ const showBreadcrumbParent = () =>
     </div>
 
     <div class="admin-navbar__actions">
-      <div class="admin-navbar__notification-wrap">
-        <button
-          class="admin-navbar__tool admin-navbar__tool--notification"
-          type="button"
-          aria-label="Notifications"
-          :aria-expanded="notificationMenuOpen ? 'true' : 'false'"
-          aria-haspopup="menu"
-          @click.stop="$emit('toggle-notifications')"
-        >
-          <i class="bi bi-bell" aria-hidden="true" />
-          <span v-if="notificationCount > 0" class="admin-navbar__icon-badge">
-            {{ formatNotificationBadge(notificationCount) }}
-          </span>
-        </button>
-
-        <div
-          v-if="notificationMenuOpen"
-          class="admin-navbar__notification-panel"
-          role="menu"
-          aria-label="Admin notifications"
-        >
-          <div class="admin-navbar__notification-head">
-            <div>
-              <strong>Notifications</strong>
-              <span>Live applicant activity</span>
-            </div>
-
-            <span v-if="notificationCount > 0" class="admin-navbar__notification-pill">
-              {{ formatNotificationBadge(notificationCount) }} new
-            </span>
-          </div>
-
-          <div v-if="props.notifications.length" class="admin-navbar__notification-list">
-            <button
-              v-for="notification in props.notifications"
-              :key="notification.id"
-              class="admin-navbar__notification-item"
-              :class="{ 'is-unread': !notification.read }"
-              type="button"
-              role="menuitem"
-              @click.stop="$emit('open-notification', notification.id)"
-            >
-              <span class="admin-navbar__notification-dot" :class="{ 'is-unread': !notification.read }" aria-hidden="true" />
-
-              <div class="admin-navbar__notification-copy">
-                <strong>{{ notification.title }}</strong>
-                <span>{{ notification.message }}</span>
-                <small>{{ formatNotificationTime(notification.createdAt) }}</small>
-              </div>
-            </button>
-          </div>
-
-          <div v-else class="admin-navbar__notification-empty">
-            Waiting for new applicant accounts.
-          </div>
-        </div>
-      </div>
+      <NotificationAdmin
+        :notifications="notifications"
+        :notification-count="notificationCount"
+        :notification-menu-open="notificationMenuOpen"
+        @toggle-notifications="$emit('toggle-notifications')"
+        @open-notification="$emit('open-notification', $event)"
+      />
 
       <div class="admin-user-menu admin-navbar__profile-wrap">
         <button
@@ -318,10 +252,6 @@ const showBreadcrumbParent = () =>
   box-shadow: inset 0 0 0 1px var(--admin-theme-accent-border);
 }
 
-.admin-navbar__tool--notification {
-  position: relative;
-}
-
 .admin-navbar__tool i {
   font-size: 0.95rem;
   line-height: 1;
@@ -411,125 +341,6 @@ const showBreadcrumbParent = () =>
   font-size: 0.86rem;
   font-weight: 600;
   cursor: pointer;
-}
-
-.admin-navbar__notification-panel {
-  position: absolute;
-  top: calc(100% + 0.65rem);
-  right: 0;
-  width: min(24rem, calc(100vw - 2rem));
-  padding: 0.55rem;
-  border: 1px solid var(--admin-border-color);
-  border-radius: 1rem;
-  background: var(--admin-bg-surface-elevated);
-  box-shadow: var(--admin-shadow-soft);
-  backdrop-filter: blur(12px);
-  z-index: 115;
-}
-
-.admin-navbar__notification-head {
-  padding: 0.45rem 0.55rem 0.7rem;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.admin-navbar__notification-head strong {
-  display: block;
-  color: var(--admin-text-primary);
-  font-size: 0.92rem;
-  font-weight: 700;
-}
-
-.admin-navbar__notification-head span {
-  color: var(--admin-text-muted);
-  font-size: 0.75rem;
-}
-
-.admin-navbar__notification-pill {
-  flex-shrink: 0;
-  padding: 0.3rem 0.55rem;
-  border-radius: 999px;
-  background: rgba(217, 91, 91, 0.1);
-  color: #b24949;
-  font-size: 0.7rem;
-  font-weight: 700;
-}
-
-.admin-navbar__notification-list {
-  display: grid;
-  gap: 0.28rem;
-}
-
-.admin-navbar__notification-item {
-  width: 100%;
-  border: 0;
-  border-radius: 0.8rem;
-  padding: 0.72rem 0.75rem;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: flex-start;
-  gap: 0.7rem;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background-color 0.2s ease,
-    transform 0.2s ease;
-}
-
-.admin-navbar__notification-item:hover {
-  transform: translateY(-1px);
-  background: var(--admin-bg-hover);
-}
-
-.admin-navbar__notification-item.is-unread {
-  background: var(--admin-theme-accent-soft);
-}
-
-.admin-navbar__notification-dot {
-  width: 0.55rem;
-  height: 0.55rem;
-  margin-top: 0.4rem;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.48);
-}
-
-.admin-navbar__notification-dot.is-unread {
-  background: #2c8a62;
-  box-shadow: 0 0 0 5px rgba(44, 138, 98, 0.12);
-}
-
-.admin-navbar__notification-copy {
-  display: grid;
-  gap: 0.18rem;
-}
-
-.admin-navbar__notification-copy strong {
-  color: var(--admin-text-primary);
-  font-size: 0.84rem;
-  font-weight: 700;
-}
-
-.admin-navbar__notification-copy span {
-  color: var(--admin-text-secondary);
-  font-size: 0.78rem;
-  line-height: 1.45;
-}
-
-.admin-navbar__notification-copy small {
-  color: var(--admin-text-muted);
-  font-size: 0.7rem;
-}
-
-.admin-navbar__notification-empty {
-  padding: 1rem 0.8rem;
-  border-radius: 0.8rem;
-  color: var(--admin-text-secondary);
-  font-size: 0.8rem;
-  background: var(--admin-bg-surface-muted);
-  text-align: center;
 }
 
 .admin-navbar__dropdown-item:hover {

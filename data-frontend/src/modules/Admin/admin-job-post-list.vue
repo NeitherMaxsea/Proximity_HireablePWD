@@ -549,12 +549,12 @@ onBeforeUnmount(() => {
 
 .admin-job-posts__summary-card {
   display: grid;
-  gap: 0.2rem;
-  padding: 1rem 1.05rem;
-  border: 1px solid var(--admin-border-color, rgba(122, 179, 145, 0.14));
-  border-radius: 1rem;
-  background: linear-gradient(180deg, var(--admin-bg-surface, #ffffff) 0%, var(--admin-bg-surface-muted, #f7fbf8) 100%);
-  box-shadow: var(--admin-shadow-soft, 0 12px 24px rgba(15, 23, 42, 0.06));
+  gap: 0.25rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(122, 179, 145, 0.14);
+  border-radius: 0.95rem;
+  background: #ffffff;
+  box-shadow: none;
 }
 
 .admin-job-posts__summary-card span {
@@ -583,18 +583,19 @@ onBeforeUnmount(() => {
 
 .admin-job-posts__search span,
 .admin-job-posts__filter span {
-  color: var(--admin-text-secondary, #5c7b69);
-  font-size: 0.76rem;
-  font-weight: 600;
+  color: #557161;
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
 .admin-job-posts__search-field,
 .admin-job-posts__filter select {
-  min-height: 2.8rem;
-  border: 1px solid var(--admin-border-color, rgba(122, 179, 145, 0.18));
-  border-radius: 0.9rem;
-  background: var(--admin-bg-surface, #ffffff);
-  box-shadow: var(--admin-shadow-soft, 0 10px 22px rgba(15, 23, 42, 0.05));
+  min-height: 2.7rem;
+  border: 1px solid #d8e3dc;
+  border-radius: 0.85rem;
+  background: #ffffff;
+  box-shadow: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 
 .admin-job-posts__search-field {
@@ -627,14 +628,20 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+.admin-job-posts__search-field:focus-within,
+.admin-job-posts__filter select:focus {
+  border-color: #79b293;
+  box-shadow: 0 0 0 3px rgba(46, 154, 98, 0.12);
+}
+
 .admin-job-posts__panel {
   display: grid;
   gap: 0.9rem;
-  padding: 1.1rem;
-  border: 1px solid var(--admin-border-color, rgba(125, 182, 148, 0.16));
-  border-radius: 1.15rem;
-  background: var(--admin-bg-surface-elevated, rgba(255, 255, 255, 0.96));
-  box-shadow: var(--admin-shadow-soft, 0 18px 38px rgba(31, 74, 51, 0.08));
+  padding: 1rem;
+  border: 1px solid rgba(213, 226, 219, 0.92);
+  border-radius: 1.2rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(247, 251, 249, 0.96) 100%);
+  box-shadow: none;
 }
 
 .admin-job-posts__head {
@@ -662,13 +669,14 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 2rem;
-  padding: 0.45rem 0.8rem;
+  min-height: 2.1rem;
+  padding: 0.4rem 0.85rem;
   border-radius: 999px;
-  background: var(--admin-theme-accent-soft, rgba(47, 106, 73, 0.09));
-  color: var(--admin-theme-accent, #29543d);
-  font-size: 0.8rem;
-  font-weight: 600;
+  border: 1px solid rgba(213, 226, 219, 0.92);
+  background: #ffffff;
+  color: #4e6c5c;
+  font-size: 0.78rem;
+  font-weight: 800;
   white-space: nowrap;
 }
 
@@ -692,10 +700,13 @@ onBeforeUnmount(() => {
 }
 
 .admin-job-posts__table-shell {
-  border: 1px solid var(--admin-border-color, rgba(122, 179, 145, 0.12));
-  border-radius: 1rem;
-  background: var(--admin-bg-surface, #ffffff);
-  overflow-x: auto;
+  border: 1px solid rgba(122, 179, 145, 0.14);
+  border-radius: 0.8rem;
+  background: #ffffff;
+  overflow: auto;
+  max-height: min(68vh, 56rem);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(117, 148, 130, 0.45) transparent;
 }
 
 .admin-job-posts__table {
@@ -734,32 +745,35 @@ onBeforeUnmount(() => {
 }
 
 .admin-job-posts__table th {
-  padding: 0.95rem 0.9rem;
-  color: var(--admin-text-secondary, #6c8575);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 0.82rem 0.9rem;
+  color: #6d8576;
   font-size: 0.76rem;
-  font-weight: 600;
+  font-weight: 700;
   text-align: left;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  background: var(--admin-bg-surface-muted, #f7fbf8);
-  border-bottom: 1px solid var(--admin-border-color, rgba(122, 179, 145, 0.12));
+  letter-spacing: normal;
+  text-transform: none;
+  background: #f7fbf8;
+  border-bottom: 1px solid rgba(122, 179, 145, 0.12);
 }
 
 .admin-job-posts__table td {
   padding: 0.95rem 0.9rem;
-  border-top: 1px solid var(--admin-border-color, rgba(122, 179, 145, 0.12));
+  border-top: 1px solid rgba(235, 241, 237, 0.96);
   vertical-align: top;
-  color: var(--admin-text-primary, #274234);
-  font-size: 0.9rem;
+  color: #234334;
+  font-size: 0.88rem;
   overflow-wrap: anywhere;
 }
 
 .admin-job-posts__row {
-  transition: background-color 0.18s ease, transform 0.18s ease;
+  transition: background-color 0.22s ease, transform 0.22s ease, opacity 0.22s ease;
 }
 
 .admin-job-posts__row:hover {
-  background: var(--admin-bg-hover, rgba(241, 245, 249, 0.96));
+  background: rgba(247, 251, 249, 0.78);
 }
 
 .admin-job-posts__cell--status,
@@ -782,16 +796,16 @@ onBeforeUnmount(() => {
 .admin-job-posts__job strong,
 .admin-job-posts__company strong,
 .admin-job-posts__dates strong {
-  color: var(--admin-text-primary, #213c30);
-  font-size: 0.94rem;
+  color: #173026;
+  font-size: 0.95rem;
   font-weight: 600;
 }
 
 .admin-job-posts__job span,
 .admin-job-posts__company span,
 .admin-job-posts__dates span {
-  color: var(--admin-text-secondary, #6f8579);
-  font-size: 0.78rem;
+  color: #728578;
+  font-size: 0.8rem;
 }
 
 .admin-job-posts__meta {
@@ -805,13 +819,13 @@ onBeforeUnmount(() => {
 .admin-job-posts__badge {
   display: inline-flex;
   align-items: center;
-  min-height: 1.55rem;
-  padding: 0.2rem 0.55rem;
+  min-height: 1.45rem;
+  padding: 0.18rem 0.5rem;
   border-radius: 999px;
-  background: var(--admin-theme-accent-soft, rgba(47, 106, 73, 0.08));
-  color: var(--admin-theme-accent, #2c5a42);
-  font-size: 0.74rem;
-  font-weight: 500;
+  background: rgba(47, 106, 73, 0.08);
+  color: #2c5a42;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .admin-job-posts__badge {
@@ -829,11 +843,14 @@ onBeforeUnmount(() => {
 .admin-job-posts__status {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   min-height: 1.8rem;
   padding: 0.28rem 0.7rem;
   border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .admin-job-posts__status.is-open {
@@ -864,12 +881,12 @@ onBeforeUnmount(() => {
 
 .admin-job-posts__action-button,
 .admin-job-posts__modal-button {
-  border: 1px solid var(--admin-border-color, rgba(122, 179, 145, 0.18));
-  background: var(--admin-bg-surface, #ffffff);
-  color: var(--admin-text-primary, #2b5540);
+  border: 1px solid rgba(122, 179, 145, 0.18);
+  background: #ffffff;
+  color: #2b5540;
   font: inherit;
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, color 0.18s ease, background-color 0.18s ease;
 }
 
 .admin-job-posts__action-button {
@@ -895,8 +912,8 @@ onBeforeUnmount(() => {
 .admin-job-posts__action-button:hover,
 .admin-job-posts__modal-button:hover {
   transform: translateY(-1px);
-  box-shadow: var(--admin-shadow-soft, 0 12px 20px rgba(31, 74, 51, 0.08));
-  border-color: var(--admin-theme-accent-border, rgba(47, 106, 73, 0.26));
+  box-shadow: 0 12px 20px rgba(31, 74, 51, 0.08);
+  border-color: rgba(47, 106, 73, 0.26);
 }
 
 .admin-job-posts__action-button:disabled,
@@ -912,6 +929,12 @@ onBeforeUnmount(() => {
   border-color: rgba(214, 120, 92, 0.2);
   color: #9b4126;
   background: rgba(255, 247, 245, 0.98);
+}
+
+.admin-job-posts__action-button:not(.is-danger):hover,
+.admin-job-posts__modal-button:not(.is-danger):hover {
+  color: #2b5540;
+  background: #ffffff;
 }
 
 .admin-job-posts__modal-content {
@@ -1045,7 +1068,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   min-height: 1.8rem;
-  color: var(--admin-text-primary, #274234);
+  color: #274234;
   font-weight: 600;
   line-height: 1.4;
 }
@@ -1111,7 +1134,7 @@ onBeforeUnmount(() => {
     display: grid;
     gap: 0.75rem;
     padding: 0.95rem;
-    border-top: 1px solid var(--admin-border-color, rgba(122, 179, 145, 0.12));
+    border-top: 1px solid rgba(235, 241, 237, 0.96);
   }
 
   .admin-job-posts__row:first-child {
@@ -1127,11 +1150,11 @@ onBeforeUnmount(() => {
     content: attr(data-label);
     display: block;
     margin-bottom: 0.28rem;
-    color: var(--admin-text-muted, #6c8575);
+    color: #6d8576;
     font-size: 0.72rem;
     font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    letter-spacing: normal;
+    text-transform: none;
   }
 
   .admin-job-posts__actions {
@@ -1146,6 +1169,10 @@ onBeforeUnmount(() => {
 @media (max-width: 640px) {
   .admin-job-posts__toolbar {
     gap: 0.75rem;
+  }
+
+  .admin-job-posts__table-shell {
+    max-height: min(62vh, 48rem);
   }
 
   .admin-job-posts__summary-card,

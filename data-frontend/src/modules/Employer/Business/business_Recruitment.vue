@@ -1,5 +1,5 @@
 ﻿<script setup>
-import { computed, ref, toRefs, watch } from 'vue'
+import { toRefs } from 'vue'
 const props = defineProps([
   'jobPostingTab',
   'isEditingJobPost',
@@ -21,9 +21,7 @@ const props = defineProps([
   'JOB_POSTING_MAX_VACANCIES',
   'JOB_POSTING_DISABILITY_TYPES',
   'jobPostingDisabilityLabel',
-  'jobPostingSelectedDisabilityTypes',
   'jobPostingDisabilityTypeNeedsSpecification',
-  'setJobPostingDisabilityTypes',
   'getJobPostingImpairmentSpecificationPlaceholder',
   'JOB_POSTING_LANGUAGE_OPTIONS',
   'jobPostingLanguageLabel',
@@ -78,9 +76,7 @@ const {
   JOB_POSTING_MAX_VACANCIES,
   JOB_POSTING_DISABILITY_TYPES,
   jobPostingDisabilityLabel,
-  jobPostingSelectedDisabilityTypes,
   jobPostingDisabilityTypeNeedsSpecification,
-  setJobPostingDisabilityTypes,
   getJobPostingImpairmentSpecificationPlaceholder,
   JOB_POSTING_LANGUAGE_OPTIONS,
   jobPostingLanguageLabel,
@@ -114,93 +110,20 @@ const {
   setJobPostingDisabilityDropdownElement,
   setJobPostingLanguageDropdownElement,
 } = toRefs(props)
-
-const JOB_POSTING_MAX_DESCRIPTION_WORDS = 500
-const JOB_POSTING_MAX_REQUIREMENT_WORDS = 100
-const countJobPostingWords = (value = '') =>
-  (String(value || '').match(/[A-Za-z]+/g) || []).length
-const descriptionWordCount = computed(() => countJobPostingWords(jobPostingDraft.value?.description))
-const qualificationWordCount = computed(() => countJobPostingWords(jobPostingDraft.value?.qualifications))
-const responsibilityWordCount = computed(() => countJobPostingWords(jobPostingDraft.value?.responsibilities))
-const isDisabilityTypeModalOpen = ref(false)
-const disabilityTypeModalSelections = ref([])
-const syncDisabilityTypeModalSelections = () => {
-  disabilityTypeModalSelections.value = Array.isArray(jobPostingSelectedDisabilityTypes.value)
-    ? [...jobPostingSelectedDisabilityTypes.value]
-    : []
-}
-const resolveDisabilityTypeUpdater = () => {
-  if (typeof props.setJobPostingDisabilityTypes === 'function') return props.setJobPostingDisabilityTypes
-  if (typeof setJobPostingDisabilityTypes.value === 'function') return setJobPostingDisabilityTypes.value
-  return null
-}
-const resolveDisabilityTypeLabel = (type = {}) =>
-  String(type?.label || type?.value || '').trim()
-const openDisabilityTypeModal = () => {
-  syncDisabilityTypeModalSelections()
-  isDisabilityTypeModalOpen.value = true
-}
-const closeDisabilityTypeModal = () => {
-  isDisabilityTypeModalOpen.value = false
-  syncDisabilityTypeModalSelections()
-}
-const toggleDisabilityTypeModalSelection = (value) => {
-  const normalizedValue = String(value || '').trim()
-  if (!normalizedValue) return
-
-  disabilityTypeModalSelections.value = disabilityTypeModalSelections.value.includes(normalizedValue)
-    ? disabilityTypeModalSelections.value.filter((entry) => entry !== normalizedValue)
-    : [...disabilityTypeModalSelections.value, normalizedValue]
-}
-const clearDisabilityTypeModalSelections = () => {
-  disabilityTypeModalSelections.value = []
-}
-const applyDisabilityTypeModalSelections = () => {
-  const updateDisabilityTypes = resolveDisabilityTypeUpdater()
-  if (!updateDisabilityTypes) return
-
-  updateDisabilityTypes(disabilityTypeModalSelections.value)
-  isDisabilityTypeModalOpen.value = false
-}
-watch(
-  jobPostingSelectedDisabilityTypes,
-  () => {
-    if (!isDisabilityTypeModalOpen.value) {
-      syncDisabilityTypeModalSelections()
-    }
-  },
-  { immediate: true, deep: true },
-)
-const resolveSaveJobPostHandler = () => {
-  if (typeof props.saveJobPost === 'function') return props.saveJobPost
-  if (typeof saveJobPost.value === 'function') return saveJobPost.value
-  return null
-}
-const handleJobPostSubmit = async () => {
-  if (isSavingJobPost.value) return
-  const saveJobPostHandler = resolveSaveJobPostHandler()
-  if (!saveJobPostHandler) return
-
-  await saveJobPostHandler()
-}
-const jobPostActionNote = computed(() =>
-  isEditingJobPost.value
-    ? 'Save the changes below to refresh the live posting in your business workspace.'
-    : 'We will check the required details first, then publish this job to your posted jobs list.',
-)
 </script>
 
 <template>
 <section class="business-job-post">
               <div class="business-job-post__lead">
                 <div class="business-job-post__copy">
+                  <p class="business-job-post__eyebrow">Job Posting</p>
                   <h2>{{ jobPostingTab === 'create' ? (isEditingJobPost ? 'Edit job post' : 'Create a new job post') : 'Posted Jobs' }}</h2>
                   <p>
                     {{
                       jobPostingTab === 'create'
                         ? isEditingJobPost
                           ? 'Update the job details below, then save your changes to refresh the live posting.'
-                          : 'Fill in the job details below to prepare a complete posting draft for your workspace.'
+                          : 'Fill in the job details below to prepare a complete posting draft for your business workspace.'
                         : 'Review, edit, close, reopen, or permanently delete the job posts saved in Firebase for this business workspace.'
                     }}
                   </p>
@@ -229,7 +152,7 @@ const jobPostActionNote = computed(() =>
 
               <div v-if="jobPostingTab === 'create'" class="business-job-post__create">
                 <div class="business-job-post__shell">
-                  <form class="business-job-post__form-shell" @submit.prevent="handleJobPostSubmit">
+                  <form class="business-job-post__form-shell" @submit.prevent="saveJobPost">
                     <fieldset class="business-job-post__fieldset" :disabled="!canEditBusinessModule('job-posting')">
                       <div class="business-job-post__section-head">
                         <div>
@@ -253,15 +176,10 @@ const jobPostActionNote = computed(() =>
                             <label class="business-job-post__field">
                               <span>Job Title</span>
                               <input
-                                :value="jobPostingDraft.title"
+                                v-model="jobPostingDraft.title"
                                 type="text"
-                                autocomplete="off"
                                 placeholder="Data Encoder"
-                                @input="handleJobPostingFieldChange('title', $event.target.value)"
                               />
-                              <div class="business-job-post__field-meta">
-                                <small class="business-job-post__field-help">Letters and spaces only. Numbers and symbols are not allowed.</small>
-                              </div>
                             </label>
 
                             <label class="business-job-post__field">
@@ -278,15 +196,10 @@ const jobPostActionNote = computed(() =>
                           <label class="business-job-post__field business-job-post__field--wide">
                             <span>Description</span>
                             <textarea
-                              :value="jobPostingDraft.description"
+                              v-model="jobPostingDraft.description"
                               rows="4"
                               placeholder="Describe the role..."
-                              @input="handleJobPostingFieldChange('description', $event.target.value)"
                             ></textarea>
-                            <div class="business-job-post__field-meta">
-                              <small class="business-job-post__field-help">Words only. Maximum of 500 words.</small>
-                              <small class="business-job-post__field-count">{{ descriptionWordCount }}/{{ JOB_POSTING_MAX_DESCRIPTION_WORDS }} words</small>
-                            </div>
                           </label>
 
                           <div class="business-job-post__grid business-job-post__grid--two">
@@ -394,16 +307,12 @@ const jobPostActionNote = computed(() =>
                             <label class="business-job-post__field">
                               <span>Vacancies</span>
                               <input
-                                :value="jobPostingDraft.vacancies"
-                                type="text"
-                                inputmode="numeric"
-                                maxlength="3"
+                                v-model="jobPostingDraft.vacancies"
+                                type="number"
+                                min="1"
+                                :max="JOB_POSTING_MAX_VACANCIES"
                                 placeholder="Enter number of vacancies"
-                                @input="handleJobPostingFieldChange('vacancies', $event.target.value)"
                               />
-                              <div class="business-job-post__field-meta">
-                                <small class="business-job-post__field-help">Numbers only. Maximum of {{ JOB_POSTING_MAX_VACANCIES }} vacancies.</small>
-                              </div>
                             </label>
                           </div>
 
@@ -436,46 +345,44 @@ const jobPostActionNote = computed(() =>
                               <div
                                 :ref="setJobPostingDisabilityDropdownElement"
                                 class="business-job-post__select-wrap"
+                                :class="{ 'is-open': isJobPostingDropdownOpen('disability') }"
                               >
                                 <button
                                   type="button"
                                   class="business-job-post__select-trigger"
-                                  :class="{ 'is-filled': jobPostingSelectedDisabilityTypes.length }"
-                                  :aria-expanded="isDisabilityTypeModalOpen ? 'true' : 'false'"
-                                  aria-haspopup="dialog"
-                                  @click="openDisabilityTypeModal"
+                                  :class="{ 'is-filled': jobPostingDraft.disabilityType }"
+                                  :aria-expanded="isJobPostingDropdownOpen('disability') ? 'true' : 'false'"
+                                  @click="toggleJobPostingDropdown('disability')"
                                 >
                                   <span>{{ jobPostingDisabilityLabel }}</span>
-                                  <i class="bi bi-ui-checks-grid business-job-post__select-icon" aria-hidden="true" />
+                                  <i class="bi bi-chevron-down business-job-post__select-icon" aria-hidden="true" />
                                 </button>
-                              </div>
-                              <div class="business-job-post__field-meta">
-                                <small class="business-job-post__field-help">Choose one or more disability types from the checklist.</small>
-                              </div>
-                              <div v-if="jobPostingSelectedDisabilityTypes.length" class="business-job-post__selection-chips">
-                                <span
-                                  v-for="type in JOB_POSTING_DISABILITY_TYPES.filter((entry) => jobPostingSelectedDisabilityTypes.includes(entry.value))"
-                                  :key="`job-post-selected-disability-${type.value}`"
-                                  class="business-job-post__selection-chip"
-                                >
-                                  {{ resolveDisabilityTypeLabel(type) }}
-                                </span>
+
+                                <transition name="business-job-post__dropdown">
+                                  <div v-if="isJobPostingDropdownOpen('disability')" class="business-job-post__select-menu business-job-post__select-menu--scroll">
+                                    <button
+                                      v-for="type in JOB_POSTING_DISABILITY_TYPES"
+                                      :key="type.value"
+                                      type="button"
+                                      class="business-job-post__select-option"
+                                      :class="{ 'is-active': jobPostingDraft.disabilityType === type.value }"
+                                      @click="selectJobPostingDropdownValue('disabilityType', type.value)"
+                                    >
+                                      <span class="business-job-post__select-option-mark" aria-hidden="true" />
+                                      <span>{{ type.label }}</span>
+                                    </button>
+                                  </div>
+                                </transition>
                               </div>
                             </label>
 
                             <label class="business-job-post__field">
                               <span>Preferred Age</span>
                               <input
-                                :value="jobPostingDraft.preferredAgeRange"
+                                v-model="jobPostingDraft.preferredAgeRange"
                                 type="text"
-                                inputmode="numeric"
-                                maxlength="3"
-                                placeholder="18 and above"
-                                @input="handleJobPostingFieldChange('preferredAgeRange', $event.target.value)"
+                                placeholder="Enter preferred age"
                               />
-                              <div class="business-job-post__field-meta">
-                                <small class="business-job-post__field-help">Numbers only. Minimum age is 18.</small>
-                              </div>
                             </label>
 
                             <label class="business-job-post__field">
@@ -514,6 +421,15 @@ const jobPostActionNote = computed(() =>
                               </div>
                             </label>
                           </div>
+
+                          <label v-if="jobPostingDisabilityTypeNeedsSpecification" class="business-job-post__field business-job-post__field--wide">
+                            <span>Impairment Specification</span>
+                            <input
+                              v-model="jobPostingDraft.impairmentSpecification"
+                              type="text"
+                              :placeholder="getJobPostingImpairmentSpecificationPlaceholder(jobPostingDraft.disabilityType)"
+                            />
+                          </label>
                         </section>
 
                         <section class="business-job-post__group">
@@ -529,64 +445,47 @@ const jobPostActionNote = computed(() =>
                             <label class="business-job-post__field">
                               <span>Qualifications</span>
                               <textarea
-                                :value="jobPostingDraft.qualifications"
+                                v-model="jobPostingDraft.qualifications"
                                 rows="5"
                                 placeholder="Basic computer literacy&#10;Attention to detail"
-                                @input="handleJobPostingFieldChange('qualifications', $event.target.value)"
                               ></textarea>
-                              <div class="business-job-post__field-meta">
-                                <small class="business-job-post__field-help">Words only. Maximum of 100 words.</small>
-                                <small class="business-job-post__field-count">{{ qualificationWordCount }}/{{ JOB_POSTING_MAX_REQUIREMENT_WORDS }} words</small>
-                              </div>
                             </label>
 
                             <label class="business-job-post__field">
                               <span>Responsibilities</span>
                               <textarea
-                                :value="jobPostingDraft.responsibilities"
+                                v-model="jobPostingDraft.responsibilities"
                                 rows="5"
                                 placeholder="Encode and verify records&#10;Coordinate with admin team"
-                                @input="handleJobPostingFieldChange('responsibilities', $event.target.value)"
                               ></textarea>
-                              <div class="business-job-post__field-meta">
-                                <small class="business-job-post__field-help">Words only. Maximum of 100 words.</small>
-                                <small class="business-job-post__field-count">{{ responsibilityWordCount }}/{{ JOB_POSTING_MAX_REQUIREMENT_WORDS }} words</small>
-                              </div>
                             </label>
                           </div>
                         </section>
                       </div>
 
                       <div class="business-job-post__actions">
-                        <p class="business-job-post__actions-note">
-                          <strong>{{ isEditingJobPost ? 'Update this job post' : 'Ready to publish?' }}</strong>
-                          <span>{{ jobPostActionNote }}</span>
-                        </p>
-
-                        <div class="business-job-post__action-buttons">
-                          <button type="submit" class="business-job-post__save" :disabled="isSavingJobPost">
-                            <i :class="isSavingJobPost ? 'bi bi-arrow-repeat' : (isEditingJobPost ? 'bi bi-check2-circle' : 'bi bi-send')" aria-hidden="true" />
-                            {{
-                              isSavingJobPost
-                                ? isEditingJobPost
-                                  ? 'Saving Changes...'
-                                  : 'Publishing...'
-                                : isEditingJobPost
-                                  ? 'Save Changes'
-                                  : 'Post Job'
-                            }}
-                          </button>
-                          <button
-                            v-if="isEditingJobPost"
-                            type="button"
-                            class="business-job-post__secondary"
-                            :disabled="isSavingJobPost"
-                            @click="cancelJobPostEditing"
-                          >
-                            <i class="bi bi-x-circle" aria-hidden="true" />
-                            Cancel Edit
-                          </button>
-                        </div>
+                        <button type="submit" class="business-job-post__save" :disabled="isSavingJobPost">
+                          <i :class="isSavingJobPost ? 'bi bi-arrow-repeat' : (isEditingJobPost ? 'bi bi-check2-circle' : 'bi bi-send')" aria-hidden="true" />
+                          {{
+                            isSavingJobPost
+                              ? isEditingJobPost
+                                ? 'Saving Changes...'
+                                : 'Publishing...'
+                              : isEditingJobPost
+                                ? 'Save Changes'
+                                : 'Post Job'
+                          }}
+                        </button>
+                        <button
+                          v-if="isEditingJobPost"
+                          type="button"
+                          class="business-job-post__secondary"
+                          :disabled="isSavingJobPost"
+                          @click="cancelJobPostEditing"
+                        >
+                          <i class="bi bi-x-circle" aria-hidden="true" />
+                          Cancel Edit
+                        </button>
                       </div>
                     </fieldset>
                   </form>
@@ -677,7 +576,7 @@ const jobPostActionNote = computed(() =>
                       </p>
                       <p>
                         <strong>Preferred Age:</strong>
-                        {{ ` ${jobPostingDraft.preferredAgeRange || '18 and above'}` }}
+                        {{ ` ${jobPostingDraft.preferredAgeRange || 'Enter preferred age'}` }}
                       </p>
                     </div>
 
@@ -735,8 +634,10 @@ const jobPostActionNote = computed(() =>
                           {{
                             buildJobPostingDisabilityFitLabel(
                               jobPostingDraft.disabilityType,
-                              '',
-                            ) || 'Select disability types'
+                              jobPostingDisabilityTypeNeedsSpecification
+                                ? jobPostingDraft.impairmentSpecification
+                                : '',
+                            ) || 'Select disability type'
                           }}
                         </strong>
                       </div>
@@ -855,87 +756,4 @@ const jobPostActionNote = computed(() =>
 
               </div>
             </section>
-
-<teleport to="body">
-  <div
-    v-if="isDisabilityTypeModalOpen"
-    class="business-job-post__modal-backdrop"
-    @click.self="closeDisabilityTypeModal"
-  >
-    <div
-      class="business-job-post__modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="business-job-post-disability-modal-title"
-    >
-      <div class="business-job-post__modal-head">
-        <div>
-          <p class="business-job-post__tips-label">Disability Type</p>
-          <strong id="business-job-post-disability-modal-title">Select one or more disability types</strong>
-        </div>
-        <button
-          type="button"
-          class="business-job-post__modal-close"
-          aria-label="Close disability type selector"
-          @click="closeDisabilityTypeModal"
-        >
-          <i class="bi bi-x-lg" aria-hidden="true" />
-        </button>
-      </div>
-
-      <div class="business-job-post__modal-body">
-        <p class="business-job-post__modal-copy">
-          Tick every disability type that fits this job opening. You can keep one selection or combine several.
-        </p>
-
-        <div class="business-job-post__checklist">
-          <label
-            v-for="type in JOB_POSTING_DISABILITY_TYPES"
-            :key="`job-post-disability-option-${type.value}`"
-            class="business-job-post__check-option"
-            :class="{ 'is-active': disabilityTypeModalSelections.includes(type.value) }"
-          >
-            <input
-              :checked="disabilityTypeModalSelections.includes(type.value)"
-              type="checkbox"
-              @change="toggleDisabilityTypeModalSelection(type.value)"
-            />
-            <span>{{ resolveDisabilityTypeLabel(type) }}</span>
-          </label>
-        </div>
-      </div>
-
-      <div class="business-job-post__modal-foot">
-        <span class="business-job-post__modal-selection-count">
-          {{ disabilityTypeModalSelections.length ? `${disabilityTypeModalSelections.length} selected` : 'No disability type selected yet' }}
-        </span>
-
-        <div class="business-job-post__modal-actions">
-          <button
-            type="button"
-            class="business-job-post__button business-job-post__button--ghost"
-            @click="clearDisabilityTypeModalSelections"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            class="business-job-post__button business-job-post__button--ghost"
-            @click="closeDisabilityTypeModal"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="business-job-post__button"
-            @click="applyDisabilityTypeModalSelections"
-          >
-            Apply Selection
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-</teleport>
-
 </template>
